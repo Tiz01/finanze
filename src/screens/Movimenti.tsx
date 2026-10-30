@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../db/DataProvider';
 import { deleteTransaction, duplicateTransaction } from '../db/transactions';
+import { computeBalances } from '../domain/balances';
 import { formatDayHeading, todayIso } from '../domain/dates';
 import { formatCents, formatSignedCents } from '../domain/money';
+import { lastVerifiedDate } from '../domain/reconcile';
 import {
   compareNewestFirst,
   filterTransactions,
@@ -13,10 +15,12 @@ import {
   type PeriodPreset,
 } from '../domain/transactions';
 import type { Account, Category, Transaction } from '../domain/types';
-import { Field, ListGroup, SelectChip, TextInput } from '../ui/controls';
+import { Button, Field, ListGroup, SelectChip, TextInput } from '../ui/controls';
 import { openEditEntry } from '../ui/entryStore';
 import { notify, notifyError, undoLastAction, useFeedback } from '../ui/feedback';
+import { closeReconcile, reconcileStore, resumeReconcile } from '../ui/reconcileStore';
 import { Screen } from '../ui/Screen';
+import { useStore } from '../ui/store';
 import { SwipeRow, type SwipeAction } from '../ui/SwipeRow';
 
 const PAGE_SIZE = 150;
@@ -83,16 +87,55 @@ function TransactionRow({ transaction, lookups }: { transaction: Transaction; lo
   );
 }
 
+function ReconcileBanner() {
+  const request = useStore(reconcileStore);
+  const { accounts, transactions } = useData();
+  if (!request || request.open || request.realBalanceCents === null) return null;
+  const account = accounts.find((item) => item.id === request.accountId);
+  if (!account) return null;
+
+  const computed = computeBalances([account], transactions, request.date).get(account.id) ?? 0;
+  const difference = request.realBalanceCents - computed;
+
+  return (
+    <section className="mb-3 rounded-2xl border border-accent bg-surface p-3 text-sm">
+      {difference === 0 ? (
+        <p className="font-semibold">{account.name}: ora il saldo coincide con la banca</p>
+      ) : (
+        <>
+          <p className="font-semibold">Differenza con la banca su {account.name}: {formatSignedCents(difference)}</p>
+          <p className="pt-0.5 text-muted">Se trovi il movimento mancante aggiungilo con +: la differenza si aggiorna da sola.</p>
+        </>
+      )}
+      <div className="mt-2 flex gap-2">
+        <Button className="flex-1" onClick={resumeReconcile}>
+          {difference === 0 ? 'Segna come verificato' : 'Torna alla verifica'}
+        </Button>
+        <Button variant="secondary" onClick={closeReconcile}>
+          Chiudi
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 export function Movimenti() {
-  const { accounts, categories, transactions } = useData();
+  const { accounts, categories, reconciliations, transactions } = useData();
   const { lastUndo } = useFeedback();
   const today = todayIso();
 
+  // Se si arriva qui per cercare il movimento mancante, si parte da quel conto e dall'ultima verifica.
+  const [searching] = useState(() => {
+    const request = reconcileStore.get();
+    const account = accounts.find((item) => item.id === request?.accountId);
+    return account ? { accountId: account.id, from: lastVerifiedDate(account, reconciliations) } : null;
+  });
+
   const [query, setQuery] = useState('');
   const [categoryId, setCategoryId] = useState('');
-  const [accountId, setAccountId] = useState('');
-  const [period, setPeriod] = useState<PeriodPreset>('tutto');
-  const [customFrom, setCustomFrom] = useState('');
+  const [accountId, setAccountId] = useState(searching?.accountId ?? '');
+  const [period, setPeriod] = useState<PeriodPreset>(searching ? 'personalizzato' : 'tutto');
+  const [customFrom, setCustomFrom] = useState(searching?.from ?? '');
   const [customTo, setCustomTo] = useState('');
   const [limit, setLimit] = useState(PAGE_SIZE);
   const sentinel = useRef<HTMLDivElement>(null);
@@ -189,6 +232,7 @@ export function Movimenti() {
         )
       }
     >
+      <ReconcileBanner />
       <div className="space-y-2 pb-2">
         <TextInput
           type="search"

@@ -43,3 +43,12 @@ export function computeBalances(
   }
   return balances;
 }
+
+/** La somma dei conti in uso che contano come liquidità. */
+export function liquidityCents(accounts: Account[], balances: Map<string, number>): number {
+  let total = 0;
+  for (const account of accounts) {
+    if (account.contaComeLiquidita && !account.archived) total += balances.get(account.id) ?? 0;
+  }
+  return total;
+}

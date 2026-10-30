@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useData } from '../db/DataProvider';
+import { confirmOccurrence } from '../db/recurring';
 import { addTransaction, editTransaction } from '../db/transactions';
 import { CATEGORY_IDS } from '../domain/categories';
 import { formatShortDate, todayIso } from '../domain/dates';
@@ -33,7 +34,13 @@ export function EntrySheet() {
   const { accounts } = useData();
   if (!request) return null;
   if (request.mode === 'new' && !accounts.some((account) => !account.archived)) return <NoAccounts />;
-  return <EntryForm key={request.mode === 'edit' ? request.transaction.id : 'new'} request={request} />;
+  const key =
+    request.mode === 'edit'
+      ? request.transaction.id
+      : request.mode === 'recurring'
+        ? `${request.recurring.id}-${request.date}`
+        : 'new';
+  return <EntryForm key={key} request={request} />;
 }
 
 function NoAccounts() {
@@ -59,23 +66,27 @@ function EntryForm({ request }: { request: EntryRequest }) {
   const { accounts, categories, transactions } = useData();
   const today = todayIso();
   const editing: Transaction | null = request.mode === 'edit' ? request.transaction : null;
+  const occurrence = request.mode === 'recurring' ? request : null;
+  const seed: TransactionDraft | null =
+    editing ??
+    (occurrence && { ...occurrence.recurring.template, date: occurrence.date, note: occurrence.recurring.name });
 
   const selectableAccounts = accounts.filter(
-    (account) => !account.archived || account.id === editing?.accountId || account.id === editing?.toAccountId,
+    (account) => !account.archived || account.id === seed?.accountId || account.id === seed?.toAccountId,
   );
 
-  const [type, setType] = useState<EntryType>(editing && editing.type !== 'rettifica' ? editing.type : 'uscita');
-  const [input, setInput] = useState(editing ? centsToKeypadInput(editing.amountCents) : '');
+  const [type, setType] = useState<EntryType>(seed && seed.type !== 'rettifica' ? seed.type : 'uscita');
+  const [input, setInput] = useState(seed ? centsToKeypadInput(seed.amountCents) : '');
   const [accountId, setAccountId] = useState(
-    editing?.accountId ?? defaultAccountId(accounts, transactions, 'uscita') ?? '',
+    seed?.accountId ?? defaultAccountId(accounts, transactions, 'uscita') ?? '',
   );
   const [toAccountId, setToAccountId] = useState(
-    editing?.toAccountId ?? otherAccountId(selectableAccounts, accountId) ?? '',
+    seed?.toAccountId ?? otherAccountId(selectableAccounts, accountId) ?? '',
   );
-  const [date, setDate] = useState(editing?.date ?? today);
-  const [categoryId, setCategoryId] = useState(editing?.categoryId);
-  const [reimbursesId, setReimbursesId] = useState(editing?.reimbursesId);
-  const [note, setNote] = useState(editing?.note ?? '');
+  const [date, setDate] = useState(seed?.date ?? today);
+  const [categoryId, setCategoryId] = useState(seed?.categoryId);
+  const [reimbursesId, setReimbursesId] = useState(seed?.reimbursesId);
+  const [note, setNote] = useState(seed?.note ?? '');
   const [tagsText, setTagsText] = useState(editing?.tags?.join(', ') ?? '');
   const [showDetails, setShowDetails] = useState(Boolean(editing?.note || editing?.tags?.length));
   const [pickingExpense, setPickingExpense] = useState(false);
@@ -98,7 +109,7 @@ function EntryForm({ request }: { request: EntryRequest }) {
     setCategoryId(undefined);
     setReimbursesId(undefined);
     setHint('');
-    if (!editing && next !== 'trasferimento') {
+    if (request.mode === 'new' && next !== 'trasferimento') {
       setAccountId(defaultAccountId(accounts, transactions, next) ?? accountId);
     }
   }
@@ -136,9 +147,19 @@ function EntryForm({ request }: { request: EntryRequest }) {
       return;
     }
     try {
-      const undo = editing ? await editTransaction(editing.id, draft) : await addTransaction(draft);
-      closeEntry();
-      notify(editing ? 'Movimento modificato' : 'Movimento salvato', undo);
+      if (editing) {
+        const undo = await editTransaction(editing.id, draft);
+        closeEntry();
+        notify('Movimento modificato', undo);
+      } else if (occurrence) {
+        const undo = await confirmOccurrence(occurrence.recurring.id, occurrence.date, draft);
+        closeEntry();
+        notify('Movimento confermato', undo);
+      } else {
+        const undo = await addTransaction(draft);
+        closeEntry();
+        notify('Movimento salvato', undo);
+      }
     } catch (error) {
       setHint(error instanceof Error ? error.message : 'Non è stato possibile salvare');
     }
@@ -146,7 +167,7 @@ function EntryForm({ request }: { request: EntryRequest }) {
 
   function pressCategory(category: Category) {
     setHint('');
-    if (editing) {
+    if (request.mode !== 'new') {
       setCategoryId(category.id);
       if (category.id !== CATEGORY_IDS.rimborsi) setReimbursesId(undefined);
       return;
@@ -165,10 +186,12 @@ function EntryForm({ request }: { request: EntryRequest }) {
 
   const linkedExpense = reimbursesId ? transactions.find((item) => item.id === reimbursesId) : undefined;
   const showLinkRow = Boolean(editing) && type === 'entrata' && categoryId === CATEGORY_IDS.rimborsi;
-  const showSaveButton = Boolean(editing) || type === 'trasferimento';
+  const showSaveButton = request.mode !== 'new' || type === 'trasferimento';
+  const sheetTitle = editing ? 'Modifica movimento' : occurrence ? occurrence.recurring.name : 'Nuovo movimento';
+  const saveLabel = editing ? 'Salva modifiche' : occurrence ? 'Conferma movimento' : 'Salva trasferimento';
 
   return (
-    <Sheet title={editing ? 'Modifica movimento' : 'Nuovo movimento'} onClose={closeEntry} tall bare>
+    <Sheet title={sheetTitle} onClose={closeEntry} tall bare>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain px-page pb-safe">
         <Segmented options={TYPE_OPTIONS} value={type} onChange={changeType} />
 
@@ -287,7 +310,7 @@ function EntryForm({ request }: { request: EntryRequest }) {
 
         {showSaveButton && (
           <Button onClick={() => void save({ reimbursesId })}>
-            {editing ? 'Salva modifiche' : 'Salva trasferimento'}
+            {saveLabel}
           </Button>
         )}
 

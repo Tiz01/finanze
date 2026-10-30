@@ -8,6 +8,7 @@ export const ROUTES = [
   'impostazioni',
   'impostazioni/conti',
   'impostazioni/categorie',
+  'impostazioni/ricorrenze',
   'impostazioni/dati',
 ] as const;
 export type Route = (typeof ROUTES)[number];

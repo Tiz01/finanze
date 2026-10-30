@@ -5,6 +5,7 @@ import {
   daysBetween,
   endOfMonth,
   formatDayHeading,
+  formatMonthYear,
   formatShortDate,
   isValidIsoDate,
   startOfMonth,
@@ -89,5 +90,13 @@ describe('etichette', () => {
     expect(formatDayHeading('2025-10-26', today)).toBe('Domenica 26 ottobre 2025');
     expect(formatShortDate('2026-10-26', today)).toBe('26 ott');
     expect(formatShortDate('2025-10-26', today)).toBe('26 ott 2025');
+  });
+});
+
+describe('formatMonthYear', () => {
+  it('scrive mese e anno in italiano, anche il primo e l’ultimo giorno', () => {
+    expect(formatMonthYear('2026-10-30')).toBe('Ottobre 2026');
+    expect(formatMonthYear('2026-01-01')).toBe('Gennaio 2026');
+    expect(formatMonthYear('2026-12-31')).toBe('Dicembre 2026');
   });
 });

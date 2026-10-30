@@ -73,13 +73,27 @@ export interface Budget {
   categoryIds: string[];
 }
 
-export interface Recurring {
+export type RecurringTemplate = Pick<
+  TransactionDraft,
+  'type' | 'amountCents' | 'accountId' | 'toAccountId' | 'categoryId'
+>;
+
+export const RECURRING_UNITS = ['giorni', 'settimane', 'mesi'] as const;
+export type RecurringUnit = (typeof RECURRING_UNITS)[number];
+
+export interface RecurringRule {
+  frequency: 'mensile' | 'annuale' | 'personalizzata';
+  /** Solo per la frequenza personalizzata: ogni quante unità. */
+  interval?: number;
+  intervalUnit?: RecurringUnit;
+  /** La prima scadenza: da qui si calcolano tutte le altre. */
+  anchorDate: IsoDate;
+}
+
+export interface Recurring extends RecurringRule {
   id: string;
   name: string;
-  template: TransactionDraft;
-  frequency: 'mensile' | 'annuale' | 'personalizzata';
-  intervalDays?: number;
-  anchorDate: IsoDate;
+  template: RecurringTemplate;
   nextDue: IsoDate;
   active: boolean;
 }

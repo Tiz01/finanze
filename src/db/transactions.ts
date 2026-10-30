@@ -5,7 +5,7 @@ import { db } from './db';
 /** Annulla l'azione appena compiuta, ripristinando esattamente lo stato precedente. */
 export type Undo = () => Promise<void>;
 
-function prepare(draft: TransactionDraft): TransactionDraft {
+export function prepareDraft(draft: TransactionDraft): TransactionDraft {
   const problem = validateTransaction(draft);
   if (problem) throw new Error(problem);
   const prepared: TransactionDraft = {
@@ -44,7 +44,7 @@ async function relinkRefunds(expenseId: string, refundIds: string[]): Promise<vo
 }
 
 export async function addTransaction(draft: TransactionDraft): Promise<Undo> {
-  const prepared = prepare(draft);
+  const prepared = prepareDraft(draft);
   return db.transaction('rw', db.transactions, async () => {
     await assertReimbursedExpense(prepared);
     const id = crypto.randomUUID();
@@ -54,7 +54,7 @@ export async function addTransaction(draft: TransactionDraft): Promise<Undo> {
 }
 
 export async function editTransaction(id: string, draft: TransactionDraft): Promise<Undo> {
-  const prepared = prepare(draft);
+  const prepared = prepareDraft(draft);
   return db.transaction('rw', db.transactions, async () => {
     const previous = await db.transactions.get(id);
     if (!previous) throw new Error('Il movimento non esiste più');
@@ -76,15 +76,20 @@ export async function editTransaction(id: string, draft: TransactionDraft): Prom
 }
 
 export async function deleteTransaction(id: string): Promise<Undo> {
-  return db.transaction('rw', db.transactions, async () => {
+  return db.transaction('rw', db.transactions, db.reconciliations, async () => {
     const previous = await db.transactions.get(id);
     if (!previous) throw new Error('Il movimento non esiste più');
     const unlinked = await unlinkRefunds(id);
+    const verifications = await db.reconciliations.filter((item) => item.adjustmentId === id).toArray();
+    await Promise.all(
+      verifications.map(({ adjustmentId: _removed, ...verification }) => db.reconciliations.put(verification)),
+    );
     await db.transactions.delete(id);
     return () =>
-      db.transaction('rw', db.transactions, async () => {
+      db.transaction('rw', db.transactions, db.reconciliations, async () => {
         await db.transactions.put(previous);
         await relinkRefunds(id, unlinked);
+        await db.reconciliations.bulkPut(verifications);
       });
   });
 }

@@ -1,4 +1,5 @@
-import { isValidIsoDate } from './dates';
+import { daysBetween, isValidIsoDate, toIsoDate } from './dates';
+import { validateRule } from './recurring';
 import { compareNewestFirst, validateTransaction } from './transactions';
 import {
   ACCOUNT_TYPES,
@@ -157,6 +158,23 @@ function categoryProblem(category: Category): string | null {
   return null;
 }
 
+function recurringProblem(recurring: Recurring, accountIds: Set<string>, categoryIds: Set<string>): string | null {
+  if (!isNonEmptyString(recurring.name)) return 'manca il nome';
+  if (!['mensile', 'annuale', 'personalizzata'].includes(recurring.frequency)) return 'la frequenza non è valida';
+  if (!isValidIsoDate(recurring.anchorDate) || !isValidIsoDate(recurring.nextDue)) return 'le date non sono valide';
+  if (typeof recurring.active !== 'boolean') return 'i campi sì/no non sono validi';
+  if (!isRecord(recurring.template)) return 'manca il movimento da ripetere';
+  const ruleProblem = validateRule(recurring);
+  if (ruleProblem) return ruleProblem;
+  const templateProblem = validateTransaction({ ...recurring.template, date: recurring.anchorDate });
+  if (templateProblem) return templateProblem;
+  const { accountId, toAccountId, categoryId } = recurring.template;
+  if (!accountIds.has(accountId)) return 'il conto non esiste';
+  if (toAccountId && !accountIds.has(toAccountId)) return 'il conto di destinazione non esiste';
+  if (categoryId && !categoryIds.has(categoryId)) return 'la categoria non esiste';
+  return null;
+}
+
 function findProblem(data: BackupData): string | null {
   for (const account of data.accounts) {
     const problem = accountProblem(account);
@@ -194,6 +212,23 @@ function findProblem(data: BackupData): string | null {
     }
   }
 
+  const movementIds = new Set(data.transactions.map((transaction) => transaction.id));
+  for (const reconciliation of data.reconciliations) {
+    const label = `Verifica del saldo del ${String(reconciliation.date)}`;
+    if (!accountIds.has(reconciliation.accountId)) return `${label}: il conto non esiste.`;
+    if (!isValidIsoDate(reconciliation.date)) return `${label}: la data non è valida.`;
+    if (!Number.isSafeInteger(reconciliation.realBalanceCents)) return `${label}: il saldo non è in centesimi interi.`;
+    if (reconciliation.adjustmentId && !movementIds.has(reconciliation.adjustmentId)) {
+      return `${label}: la rettifica collegata non esiste.`;
+    }
+  }
+
+  for (const recurring of data.recurring) {
+    const label = `Ricorrenza «${String(recurring.name)}»`;
+    const problem = recurringProblem(recurring, accountIds, categoryIds);
+    if (problem) return `${label}: ${problem}.`;
+  }
+
   for (const name of ['budgets', 'recurring', 'reconciliations', 'importProfiles', 'importRules', 'holdings'] as const) {
     const rows = data[name] as { id?: unknown }[];
     if (!rows.every((row) => isNonEmptyString(row.id))) return `La tabella ${name} ha righe senza identificatore.`;
@@ -223,4 +258,20 @@ export function summarizeData(data: Pick<BackupData, 'accounts' | 'categories' |
     firstDate: sorted[sorted.length - 1]?.date,
     lastDate: sorted[0]?.date,
   };
+}
+
+export const BACKUP_REMINDER_DAYS = 14;
+
+export type BackupReminder = { kind: 'never' } | { kind: 'old'; days: number };
+
+/** Se e perché ricordare di fare un backup: mai finché non ci sono dati da perdere. */
+export function backupReminder(
+  lastBackupAt: string | undefined,
+  hasData: boolean,
+  today: IsoDate,
+): BackupReminder | null {
+  if (!hasData) return null;
+  if (!lastBackupAt) return { kind: 'never' };
+  const days = daysBetween(toIsoDate(new Date(lastBackupAt)), today);
+  return days > BACKUP_REMINDER_DAYS ? { kind: 'old', days } : null;
 }

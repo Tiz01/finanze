@@ -4,6 +4,7 @@ import {
   centsToKeypadInput,
   formatCents,
   formatKeypadInput,
+  formatRate,
   formatSignedCents,
   keypadInputToCents,
   parseAmount,
@@ -127,5 +128,18 @@ describe('tastierino', () => {
     expect(formatKeypadInput('1234')).toBe('1.234');
     expect(formatKeypadInput('1234,5')).toBe('1.234,5');
     expect(formatKeypadInput('1234,')).toBe('1.234,');
+  });
+});
+
+describe('formatRate', () => {
+  it('arrotonda alla percentuale intera', () => {
+    expect(formatRate(0.456)).toBe('46%');
+    expect(formatRate(1)).toBe('100%');
+    expect(formatRate(0)).toBe('0%');
+  });
+
+  it('mostra il segno negativo', () => {
+    expect(formatRate(-0.507)).toBe(`${MINUS}51%`);
+    expect(formatRate(-0.001)).toBe('0%');
   });
 });

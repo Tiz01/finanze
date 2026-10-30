@@ -116,3 +116,9 @@ export function formatKeypadInput(input: string): string {
   const grouped = groupThousands(integerPart);
   return decimalPart === undefined ? grouped : `${grouped},${decimalPart}`;
 }
+
+/** Una frazione come percentuale intera: 0,456 diventa 46%. */
+export function formatRate(rate: number): string {
+  const percent = Math.round(rate * 100);
+  return `${percent < 0 ? MINUS : ''}${Math.abs(percent)}%`;
+}

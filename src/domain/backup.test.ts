@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { buildBackup, parseBackup, SCHEMA_VERSION, serializeBackup, summarizeData, type BackupData } from './backup';
+import {
+  backupReminder,
+  buildBackup,
+  parseBackup,
+  SCHEMA_VERSION,
+  serializeBackup,
+  summarizeData,
+  type BackupData,
+} from './backup';
 import { DEFAULT_CATEGORIES } from './categories';
-import type { Account, Transaction } from './types';
+import type { Account, Recurring, Reconciliation, Transaction } from './types';
 
 const account: Account = {
   id: 'a',
@@ -164,5 +172,62 @@ describe('summarizeData', () => {
     const summary = summarizeData(data({ transactions: [] }));
     expect(summary.firstDate).toBeUndefined();
     expect(summary.lastDate).toBeUndefined();
+  });
+});
+
+describe('parseBackup: verifiche e ricorrenze', () => {
+  const reconciliation: Reconciliation = { id: 'v', accountId: 'a', date: '2026-02-05', realBalanceCents: 92000 };
+  const recurring: Recurring = {
+    id: 'r',
+    name: 'Affitto',
+    frequency: 'mensile',
+    anchorDate: '2026-01-01',
+    nextDue: '2026-11-01',
+    active: true,
+    template: { type: 'uscita', amountCents: 50000, accountId: 'a', categoryId: 'cat-casa' },
+  };
+
+  it('accetta dati validi e li conserva', () => {
+    const result = parseBackup(serialized({ reconciliations: [reconciliation], recurring: [recurring] }));
+    expect(result.ok && result.backup.data.reconciliations).toEqual([reconciliation]);
+    expect(result.ok && result.backup.data.recurring).toEqual([recurring]);
+  });
+
+  it('rifiuta verifiche non coerenti', () => {
+    expect(errorOf(serialized({ reconciliations: [{ ...reconciliation, accountId: 'x' }] }))).toMatch(/conto non esiste/);
+    expect(errorOf(serialized({ reconciliations: [{ ...reconciliation, date: 'ieri' }] }))).toMatch(/data non è valida/);
+    expect(errorOf(serialized({ reconciliations: [{ ...reconciliation, realBalanceCents: 0.5 }] }))).toMatch(/centesimi/);
+    expect(errorOf(serialized({ reconciliations: [{ ...reconciliation, adjustmentId: 'x' }] }))).toMatch(/rettifica collegata/);
+  });
+
+  it('rifiuta ricorrenze non coerenti', () => {
+    const template = recurring.template;
+    expect(errorOf(serialized({ recurring: [{ ...recurring, name: '' }] }))).toMatch(/nome/);
+    expect(errorOf(serialized({ recurring: [{ ...recurring, nextDue: 'mai' }] }))).toMatch(/date/);
+    expect(errorOf(serialized({ recurring: [{ ...recurring, frequency: 'boh' as never }] }))).toMatch(/frequenza/);
+    expect(errorOf(serialized({ recurring: [{ ...recurring, frequency: 'personalizzata' }] }))).toMatch(/intervallo/);
+    expect(errorOf(serialized({ recurring: [{ ...recurring, template: { ...template, amountCents: 0 } }] }))).toMatch(/importo/i);
+    expect(errorOf(serialized({ recurring: [{ ...recurring, template: { ...template, accountId: 'x' } }] }))).toMatch(/conto non esiste/);
+    expect(errorOf(serialized({ recurring: [{ ...recurring, template: { ...template, categoryId: 'x' } }] }))).toMatch(/categoria non esiste/);
+  });
+});
+
+describe('backupReminder', () => {
+  const today = '2026-10-30';
+  const atNoon = (date: string) => new Date(`${date}T12:00:00`).toISOString();
+
+  it('non dice nulla finché non ci sono dati', () => {
+    expect(backupReminder(undefined, false, today)).toBeNull();
+    expect(backupReminder(atNoon('2026-01-01'), false, today)).toBeNull();
+  });
+
+  it('segnala se non è mai stato fatto un backup', () => {
+    expect(backupReminder(undefined, true, today)).toEqual({ kind: 'never' });
+  });
+
+  it('avvisa solo oltre i 14 giorni', () => {
+    expect(backupReminder(atNoon('2026-10-30'), true, today)).toBeNull();
+    expect(backupReminder(atNoon('2026-10-16'), true, today)).toBeNull();
+    expect(backupReminder(atNoon('2026-10-15'), true, today)).toEqual({ kind: 'old', days: 15 });
   });
 });

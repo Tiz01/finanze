@@ -28,7 +28,11 @@ export async function updateAccount(id: string, draft: AccountDraft): Promise<vo
 }
 
 export async function deleteAccount(id: string): Promise<void> {
-  await db.transaction('rw', db.accounts, db.transactions, db.reconciliations, async () => {
+  await db.transaction('rw', db.accounts, db.transactions, db.reconciliations, db.recurring, async () => {
+    const usedByRecurring = await db.recurring
+      .filter(({ template }) => template.accountId === id || template.toAccountId === id)
+      .count();
+    if (usedByRecurring > 0) throw new Error('Il conto è usato da una ricorrenza: togli prima quella');
     const used =
       (await db.transactions.where('accountId').equals(id).count()) +
       (await db.transactions.where('toAccountId').equals(id).count()) +

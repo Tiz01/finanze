@@ -1,6 +1,8 @@
-import { addMonths, startOfMonth } from '../domain/dates';
+import { computeBalances } from '../domain/balances';
 import { CATEGORY_IDS } from '../domain/categories';
-import type { Account, IsoDate, Transaction, TransactionDraft } from '../domain/types';
+import { addDays, addMonths, startOfMonth } from '../domain/dates';
+import { firstOccurrenceOnOrAfter } from '../domain/recurring';
+import type { Account, IsoDate, Recurring, Reconciliation, Transaction, TransactionDraft } from '../domain/types';
 
 // Dati inventati, caricati solo dal pulsante "Carica dati demo": non corrispondono a nessuna persona.
 
@@ -31,6 +33,8 @@ function makeAccount(
 export function buildDemoData(today: IsoDate, now: Date = new Date()): {
   accounts: Account[];
   transactions: Transaction[];
+  recurring: Recurring[];
+  reconciliations: Reconciliation[];
 } {
   const createdAt = (offset: number) => new Date(now.getTime() + offset).toISOString();
   const start = addMonths(startOfMonth(today), -(DEMO_MONTHS - 1));
@@ -84,8 +88,66 @@ export function buildDemoData(today: IsoDate, now: Date = new Date()): {
 
   // Il rimborso resta valido solo se anche la spesa rientra nel periodo.
   const ids = new Set(transactions.map((transaction) => transaction.id));
-  return {
-    accounts,
-    transactions: transactions.filter((item) => !item.reimbursesId || ids.has(item.reimbursesId)),
+  const validTransactions = transactions.filter((item) => !item.reimbursesId || ids.has(item.reimbursesId));
+
+  // Una verifica che torna e una che ha richiesto una rettifica.
+  const verifiedDate = addDays(today, -5);
+  const adjustedDate = addDays(today, -20);
+  const adjustment: Transaction = {
+    id: 'demo-rettifica',
+    date: adjustedDate,
+    amountCents: -350,
+    type: 'rettifica',
+    accountId: 'demo-contanti',
+    categoryId: CATEGORY_IDS.nonTracciato,
+    createdAt: createdAt(4),
   };
+  const allTransactions = [...validTransactions, adjustment];
+  const balanceAt = (accountId: string, date: IsoDate) =>
+    computeBalances(accounts, allTransactions, date).get(accountId) ?? 0;
+
+  const reconciliations: Reconciliation[] = [
+    { id: 'demo-verifica-1', accountId: 'demo-corrente', date: verifiedDate, realBalanceCents: balanceAt('demo-corrente', verifiedDate) },
+    {
+      id: 'demo-verifica-2',
+      accountId: 'demo-contanti',
+      date: adjustedDate,
+      realBalanceCents: balanceAt('demo-contanti', adjustedDate),
+      adjustmentId: adjustment.id,
+    },
+  ];
+
+  // Due ricorrenze con scadenze da confermare e una ancora da venire.
+  const thisMonth = startOfMonth(today);
+  const pac = { frequency: 'mensile', anchorDate: `${start.slice(0, 7)}-28` } as const;
+  const recurring: Recurring[] = [
+    {
+      id: 'demo-internet',
+      name: 'Internet di casa (demo)',
+      frequency: 'mensile',
+      anchorDate: thisMonth,
+      nextDue: thisMonth,
+      active: true,
+      template: { type: 'uscita', amountCents: 2490, accountId: 'demo-corrente', categoryId: 'cat-casa' },
+    },
+    {
+      id: 'demo-palestra',
+      name: 'Corso di nuoto (demo)',
+      frequency: 'mensile',
+      anchorDate: addMonths(thisMonth, -1),
+      nextDue: addMonths(thisMonth, -1),
+      active: true,
+      template: { type: 'uscita', amountCents: 3500, accountId: 'demo-corrente', categoryId: 'cat-sport-salute' },
+    },
+    {
+      id: 'demo-pac',
+      name: 'Piano di accumulo (demo)',
+      ...pac,
+      nextDue: firstOccurrenceOnOrAfter(pac, addDays(today, 1)),
+      active: true,
+      template: { type: 'trasferimento', amountCents: 10000, accountId: 'demo-corrente', toAccountId: 'demo-broker' },
+    },
+  ];
+
+  return { accounts, transactions: allTransactions, recurring, reconciliations };
 }

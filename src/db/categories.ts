@@ -31,10 +31,12 @@ export async function updateCategory(id: string, draft: CategoryDraft): Promise<
 }
 
 export async function deleteCategory(id: string): Promise<void> {
-  await db.transaction('rw', db.categories, db.transactions, async () => {
+  await db.transaction('rw', db.categories, db.transactions, db.recurring, async () => {
     const category = await db.categories.get(id);
     if (!category) return;
     if (category.system) throw new Error('Questa categoria serve ai report: puoi solo rinominarla');
+    const usedByRecurring = await db.recurring.filter(({ template }) => template.categoryId === id).count();
+    if (usedByRecurring > 0) throw new Error('La categoria è usata da una ricorrenza: togli prima quella');
     const used = await db.transactions.where('categoryId').equals(id).count();
     if (used > 0) throw new Error('La categoria ha dei movimenti: puoi solo archiviarla');
     await db.categories.delete(id);

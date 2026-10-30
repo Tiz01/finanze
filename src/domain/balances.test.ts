@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeBalances } from './balances';
+import { computeBalances, liquidityCents } from './balances';
 import type { Account, Transaction } from './types';
 
 function account(id: string, initialBalanceCents = 0, initialBalanceDate = '2026-01-01'): Account {
@@ -126,5 +126,31 @@ describe('computeBalances', () => {
     );
     expect(balances.get('a')).toBe(-400);
     expect(balances.has('altro')).toBe(false);
+  });
+});
+
+describe('liquidityCents', () => {
+  it('somma solo i conti in uso che contano come liquidità', () => {
+    const accounts = [
+      account('corrente', 100000),
+      account('contanti', 5000),
+      { ...account('deposito', 300000), contaComeLiquidita: false },
+      { ...account('broker', 900000), type: 'investimento' as const, contaComeLiquidita: false },
+      { ...account('chiuso', 7000), archived: true },
+    ];
+    const balances = computeBalances(accounts, [], today);
+    expect(liquidityCents(accounts, balances)).toBe(105000);
+  });
+
+  it('un trasferimento verso un conto fuori dalla liquidità la riduce', () => {
+    const accounts = [account('a', 100000), { ...account('b', 0), contaComeLiquidita: false }];
+    const transactions = [movement({ type: 'trasferimento', amountCents: 40000, toAccountId: 'b' })];
+    expect(liquidityCents(accounts, computeBalances(accounts, transactions, today))).toBe(60000);
+  });
+
+  it('senza conti vale zero e ammette totali negativi', () => {
+    expect(liquidityCents([], new Map())).toBe(0);
+    const accounts = [account('a', -500)];
+    expect(liquidityCents(accounts, computeBalances(accounts, [], today))).toBe(-500);
   });
 });

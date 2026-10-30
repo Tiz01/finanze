@@ -108,3 +108,10 @@ export function formatShortDate(date: IsoDate, today: IsoDate): string {
 export function formatFullDate(date: IsoDate): string {
   return SHORT_YEAR_FORMAT.format(localDate(date));
 }
+
+const MONTH_FORMAT = new Intl.DateTimeFormat('it-IT', { month: 'long', year: 'numeric' });
+
+export function formatMonthYear(date: IsoDate): string {
+  const text = MONTH_FORMAT.format(localDate(date));
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}

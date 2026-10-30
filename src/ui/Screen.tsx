@@ -1,14 +1,16 @@
 import type { ReactNode } from 'react';
 
 interface ScreenProps {
-  title: string;
+  title?: string;
+  /** Sostituisce il titolo: la Home mette qui la liquidità. */
+  hero?: ReactNode;
   back?: { href: string; label: string };
   action?: ReactNode;
   children: ReactNode;
 }
 
 // Il titolo parte più in basso perché iOS sfoca i primi 32 punti circa sotto la barra di stato.
-export function Screen({ title, back, action, children }: ScreenProps) {
+export function Screen({ title, hero, back, action, children }: ScreenProps) {
   return (
     <>
       <header className="border-b border-line bg-surface pt-safe">
@@ -19,7 +21,7 @@ export function Screen({ title, back, action, children }: ScreenProps) {
                 ‹ {back.label}
               </a>
             )}
-            <h1 className="truncate text-2xl font-bold">{title}</h1>
+            {hero ?? <h1 className="truncate text-2xl font-bold">{title}</h1>}
           </div>
           {action}
         </div>
