@@ -8,6 +8,9 @@
   --line: #dfe4e6;
   --accent: #0f766e;
   --on-accent: #ffffff;
+  --positive: #0f766e;
+  --danger: #b42318;
+  --on-danger: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -19,6 +22,9 @@
     --line: #283036;
     --accent: #2dd4bf;
     --on-accent: #06211e;
+    --positive: #2dd4bf;
+    --danger: #f97066;
+    --on-danger: #2a0a06;
   }
 }
 
@@ -30,6 +36,9 @@
   --color-line: var(--line);
   --color-accent: var(--accent);
   --color-on-accent: var(--on-accent);
+  --color-positive: var(--positive);
+  --color-danger: var(--danger);
+  --color-on-danger: var(--on-danger);
 }
 
 @utility pt-safe {
@@ -38,6 +47,10 @@
 
 @utility pb-safe {
   padding-bottom: env(safe-area-inset-bottom);
+}
+
+@utility pb-safe-4 {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 1rem);
 }
 
 @utility px-page {
@@ -67,5 +80,33 @@ body {
   inset: 0;
   display: flex;
   flex-direction: column;
-  background-color: var(--bg);
+  background-color: var(--surface);
+}
+
+.sheet-backdrop {
+  animation: fade-in 150ms ease-out;
+}
+
+.sheet-panel {
+  animation: sheet-in 150ms ease-out;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateY(2rem);
+    opacity: 0.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-backdrop,
+  .sheet-panel {
+    animation: none;
+  }
 }

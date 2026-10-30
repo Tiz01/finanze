@@ -1,15 +1,30 @@
 import type { ReactNode } from 'react';
 
+interface ScreenProps {
+  title: string;
+  back?: { href: string; label: string };
+  action?: ReactNode;
+  children: ReactNode;
+}
+
 // Il titolo parte più in basso perché iOS sfoca i primi 32 punti circa sotto la barra di stato.
-export function Screen({ title, children }: { title: string; children: ReactNode }) {
+export function Screen({ title, back, action, children }: ScreenProps) {
   return (
     <>
       <header className="border-b border-line bg-surface pt-safe">
-        <h1 className="px-page pt-8 pb-3 text-2xl font-bold">{title}</h1>
+        <div className="flex items-end justify-between gap-3 px-page pt-8 pb-3">
+          <div className="min-w-0">
+            {back && (
+              <a href={back.href} className="block py-1 text-sm font-medium text-accent">
+                ‹ {back.label}
+              </a>
+            )}
+            <h1 className="truncate text-2xl font-bold">{title}</h1>
+          </div>
+          {action}
+        </div>
       </header>
-      <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-page py-4">
-        {children}
-      </main>
+      <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-bg px-page py-4">{children}</main>
     </>
   );
 }
