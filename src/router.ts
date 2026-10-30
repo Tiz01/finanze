@@ -10,6 +10,8 @@ export const ROUTES = [
   'impostazioni/categorie',
   'impostazioni/buste',
   'impostazioni/ricorrenze',
+  'impostazioni/import',
+  'impostazioni/regole',
   'impostazioni/dati',
 ] as const;
 export type Route = (typeof ROUTES)[number];

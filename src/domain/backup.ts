@@ -1,6 +1,7 @@
 import { defaultBudgets } from './budgets';
 import { daysBetween, isValidIsoDate, toIsoDate } from './dates';
 import { validateRule } from './recurring';
+import { mappingShapeProblem } from './statementMapping';
 import { compareNewestFirst, validateTransaction } from './transactions';
 import {
   ACCOUNT_TYPES,
@@ -186,14 +187,27 @@ function recurringProblem(recurring: Recurring, accountIds: Set<string>, categor
   return null;
 }
 
-function budgetProblem(budget: Budget, categoryIds: Set<string>): string | null {
+function budgetProblem(budget: Budget, accountIds: Set<string>, categoryIds: Set<string>): string | null {
   if (!isNonEmptyString(budget.name)) return 'manca il nome';
   if (budget.kind !== 'tetto' && budget.kind !== 'obiettivo') return 'il tipo non è valido';
   if (!Number.isSafeInteger(budget.amountCents) || budget.amountCents <= 0) return 'l’importo non è valido';
   if (!Array.isArray(budget.categoryIds)) return 'le categorie non sono valide';
   if (!budget.categoryIds.every((id) => categoryIds.has(id))) return 'una categoria non esiste';
+  if (budget.accountId !== undefined && !accountIds.has(budget.accountId)) return 'il conto non esiste';
   if (typeof budget.order !== 'number') return 'l’ordine non è valido';
   return null;
+}
+
+function profileProblem(profile: ImportProfile, accountIds: Set<string>): string | null {
+  if (!isNonEmptyString(profile.name)) return 'manca il nome';
+  if (typeof profile.signature !== 'string') return 'le intestazioni non sono valide';
+  if (profile.accountId !== undefined && !accountIds.has(profile.accountId)) return 'il conto non esiste';
+  return mappingShapeProblem(profile.mapping);
+}
+
+function importRuleProblem(rule: ImportRule, categoryIds: Set<string>): string | null {
+  if (!isNonEmptyString(rule.contains)) return 'manca il testo da cercare';
+  return categoryIds.has(rule.categoryId) ? null : 'la categoria non esiste';
 }
 
 function findProblem(data: BackupData): string | null {
@@ -245,8 +259,18 @@ function findProblem(data: BackupData): string | null {
   }
 
   for (const budget of data.budgets) {
-    const problem = budgetProblem(budget, categoryIds);
+    const problem = budgetProblem(budget, accountIds, categoryIds);
     if (problem) return `Busta «${String(budget.name)}»: ${problem}.`;
+  }
+
+  for (const profile of data.importProfiles) {
+    const problem = profileProblem(profile, accountIds);
+    if (problem) return `Banca «${String(profile.name)}»: ${problem}.`;
+  }
+
+  for (const rule of data.importRules) {
+    const problem = importRuleProblem(rule, categoryIds);
+    if (problem) return `Regola «${String(rule.contains)}»: ${problem}.`;
   }
 
   for (const recurring of data.recurring) {

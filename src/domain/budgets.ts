@@ -45,25 +45,41 @@ function statusOf(budget: Budget, usedCents: number): BudgetStatus {
   return usedCents >= budget.amountCents * NEAR_LIMIT ? 'vicino' : 'regolare';
 }
 
+function addTo(totals: Map<string, number>, key: string, cents: number): void {
+  totals.set(key, (totals.get(key) ?? 0) + cents);
+}
+
 /**
- * Un tetto somma le spese delle sue categorie, al netto dei rimborsi e su qualunque conto.
- * Un obiettivo misura i trasferimenti netti verso i conti investimento.
+ * Un tetto somma le spese delle sue categorie, oppure tutte quelle pagate dal suo conto: sempre al netto dei rimborsi.
+ * Un obiettivo su un conto somma i trasferimenti in arrivo, perché un prelievo non cancella quanto si è messo da parte.
+ * Senza conto misura i trasferimenti netti verso i conti investimento, come il report.
  */
 export function budgetProgress(budgets: Budget[], data: ReportData, from: IsoDate, to: IsoDate): BudgetProgress[] {
   const net = netAmounts(data.transactions);
   const { investedCents } = summarizePeriod(data, from, to, net);
 
   const spentByCategory = new Map<string, number>();
-  for (const { categoryId, date, id, type } of data.transactions) {
-    if (type !== 'uscita' || !categoryId || date < from || date > to) continue;
-    spentByCategory.set(categoryId, (spentByCategory.get(categoryId) ?? 0) + (net.expense.get(id) ?? 0));
+  const spentByAccount = new Map<string, number>();
+  const receivedByAccount = new Map<string, number>();
+  for (const { accountId, amountCents, categoryId, date, id, toAccountId, type } of data.transactions) {
+    if (date < from || date > to) continue;
+    if (type === 'uscita') {
+      const spent = net.expense.get(id) ?? 0;
+      addTo(spentByAccount, accountId, spent);
+      if (categoryId) addTo(spentByCategory, categoryId, spent);
+    } else if (type === 'trasferimento' && toAccountId) {
+      addTo(receivedByAccount, toAccountId, amountCents);
+    }
+  }
+
+  function usedBy({ accountId, categoryIds, kind }: Budget): number {
+    if (kind === 'obiettivo') return accountId ? (receivedByAccount.get(accountId) ?? 0) : investedCents;
+    if (accountId) return spentByAccount.get(accountId) ?? 0;
+    return categoryIds.reduce((total, id) => total + (spentByCategory.get(id) ?? 0), 0);
   }
 
   return budgets.map((budget) => {
-    const usedCents =
-      budget.kind === 'obiettivo'
-        ? investedCents
-        : budget.categoryIds.reduce((total, id) => total + (spentByCategory.get(id) ?? 0), 0);
+    const usedCents = usedBy(budget);
     const ratio = budget.amountCents > 0 ? usedCents / budget.amountCents : 0;
     return {
       budget,

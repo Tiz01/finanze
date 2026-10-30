@@ -31,7 +31,7 @@ export async function updateCategory(id: string, draft: CategoryDraft): Promise<
 }
 
 export async function deleteCategory(id: string): Promise<void> {
-  await db.transaction('rw', db.categories, db.transactions, db.recurring, db.budgets, async () => {
+  await db.transaction('rw', [db.categories, db.transactions, db.recurring, db.budgets, db.importRules], async () => {
     const category = await db.categories.get(id);
     if (!category) return;
     if (category.system) throw new Error('Questa categoria serve ai report: puoi solo rinominarla');
@@ -45,5 +45,6 @@ export async function deleteCategory(id: string): Promise<void> {
       .modify((budget) => {
         budget.categoryIds = budget.categoryIds.filter((categoryId) => categoryId !== id);
       });
+    await db.importRules.filter((rule) => rule.categoryId === id).delete();
   });
 }

@@ -22,7 +22,9 @@ function statusText({ budget, remainingCents, status }: BudgetProgress): string 
     case 'vicino':
       return remainingCents === 0 ? 'Limite raggiunto' : `Restano solo ${formatCents(remainingCents)}`;
     case 'regolare':
-      return budget.categoryIds.length === 0 ? 'Nessuna categoria: tocca per sceglierle' : `Restano ${formatCents(remainingCents)}`;
+      return budget.categoryIds.length === 0 && !budget.accountId
+        ? 'Nessuna categoria: tocca per sceglierle'
+        : `Restano ${formatCents(remainingCents)}`;
   }
 }
 

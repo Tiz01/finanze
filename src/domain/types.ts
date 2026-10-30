@@ -70,8 +70,13 @@ export interface Budget {
   name: string;
   kind: 'tetto' | 'obiettivo';
   amountCents: number;
-  /** Solo per un tetto: un obiettivo si misura sui trasferimenti verso i conti investimento. */
+  /** Solo per un tetto senza conto: le categorie da sommare. */
   categoryIds: string[];
+  /**
+   * Un tetto conta le uscite pagate da questo conto, qualunque sia la categoria.
+   * Un obiettivo conta i trasferimenti verso questo conto; senza, quelli verso i conti investimento.
+   */
+  accountId?: string;
   order: number;
 }
 
@@ -108,10 +113,36 @@ export interface Reconciliation {
   adjustmentId?: string;
 }
 
+/** Come leggere le date ambigue: 03/04 è il 3 aprile (gma) o il 4 marzo (mga). */
+export type DateOrder = 'gma' | 'mga';
+
+/** Le colonne sono null finché non sono state scelte. */
+export type AmountMapping =
+  /** Una colonna con il segno; `invert` per i file in cui le spese sono positive. */
+  | { mode: 'segno'; column: number | null; invert: boolean }
+  | { mode: 'due-colonne'; incomeColumn: number | null; expenseColumn: number | null }
+  /** Importo senza segno più una colonna che dice la direzione, per esempio Dare/Avere. */
+  | { mode: 'tipo'; column: number | null; typeColumn: number | null; incomeValue: string };
+
+export interface ImportMapping {
+  /** La riga con le intestazioni, contando da 0; null se il file non ne ha. */
+  headerRow: number | null;
+  dateColumn: number | null;
+  dateOrder: DateOrder;
+  descriptionColumn: number | null;
+  /** Una seconda colonna da aggiungere alla descrizione. */
+  detailsColumn: number | null;
+  amount: AmountMapping;
+}
+
 export interface ImportProfile {
   id: string;
   name: string;
-  mapping: Record<string, string>;
+  /** Le intestazioni del file: servono a riconoscere la banca la volta dopo. */
+  signature: string;
+  mapping: ImportMapping;
+  /** L'ultimo conto su cui si è importato con questa mappatura. */
+  accountId?: string;
 }
 
 export interface ImportRule {

@@ -28,7 +28,7 @@ export async function updateAccount(id: string, draft: AccountDraft): Promise<vo
 }
 
 export async function deleteAccount(id: string): Promise<void> {
-  await db.transaction('rw', db.accounts, db.transactions, db.reconciliations, db.recurring, async () => {
+  await db.transaction('rw', [db.accounts, db.transactions, db.reconciliations, db.recurring, db.budgets, db.importProfiles], async () => {
     const usedByRecurring = await db.recurring
       .filter(({ template }) => template.accountId === id || template.toAccountId === id)
       .count();
@@ -39,5 +39,15 @@ export async function deleteAccount(id: string): Promise<void> {
       (await db.reconciliations.where('accountId').equals(id).count());
     if (used > 0) throw new Error('Il conto ha dei movimenti: puoi solo archiviarlo');
     await db.accounts.delete(id);
+    await db.budgets
+      .filter((budget) => budget.accountId === id)
+      .modify((budget) => {
+        delete budget.accountId;
+      });
+    await db.importProfiles
+      .filter((profile) => profile.accountId === id)
+      .modify((profile) => {
+        delete profile.accountId;
+      });
   });
 }

@@ -249,6 +249,7 @@ describe('parseBackup: buste', () => {
     expect(errorOf(serialized({ budgets: [{ ...budget, amountCents: 1.5 }] }))).toMatch(/importo/);
     expect(errorOf(serialized({ budgets: [{ ...budget, categoryIds: ['x'] }] }))).toMatch(/categoria non esiste/);
     expect(errorOf(serialized({ budgets: [{ ...budget, categoryIds: 'x' as never }] }))).toMatch(/categorie/);
+    expect(errorOf(serialized({ budgets: [{ ...budget, accountId: 'x' }] }))).toMatch(/conto non esiste/);
   });
 
   describe('dalla versione 1', () => {

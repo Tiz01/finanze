@@ -8,6 +8,7 @@ import { Buste } from './screens/settings/Buste';
 import { Categorie } from './screens/settings/Categorie';
 import { Conti } from './screens/settings/Conti';
 import { Dati } from './screens/settings/Dati';
+import { Regole } from './screens/settings/Regole';
 import { Ricorrenze } from './screens/settings/Ricorrenze';
 import { EntrySheet } from './ui/EntrySheet';
 import { ErrorBoundary } from './ui/ErrorBoundary';
@@ -18,6 +19,8 @@ import { UpdateBanner } from './ui/UpdateBanner';
 
 // A parte, così la libreria dei grafici si carica solo quando serve.
 const Report = lazy(() => import('./screens/Report').then((module) => ({ default: module.Report })));
+// Anche la lettura dei file delle banche: serve di rado.
+const Importa = lazy(() => import('./screens/settings/Importa').then((module) => ({ default: module.Importa })));
 
 const SCREENS: Record<Route, ComponentType> = {
   home: Home,
@@ -28,6 +31,8 @@ const SCREENS: Record<Route, ComponentType> = {
   'impostazioni/categorie': Categorie,
   'impostazioni/buste': Buste,
   'impostazioni/ricorrenze': Ricorrenze,
+  'impostazioni/import': Importa,
+  'impostazioni/regole': Regole,
   'impostazioni/dati': Dati,
 };
 

@@ -9,11 +9,13 @@ function prepare(draft: BudgetDraft): BudgetDraft {
   if (!Number.isSafeInteger(draft.amountCents) || draft.amountCents <= 0) {
     throw new Error('L’importo deve essere maggiore di zero');
   }
+  const onAccount = Boolean(draft.accountId);
   return {
     name,
     kind: draft.kind,
     amountCents: draft.amountCents,
-    categoryIds: draft.kind === 'obiettivo' ? [] : [...new Set(draft.categoryIds)],
+    categoryIds: draft.kind === 'obiettivo' || onAccount ? [] : [...new Set(draft.categoryIds)],
+    ...(onAccount ? { accountId: draft.accountId } : {}),
   };
 }
 

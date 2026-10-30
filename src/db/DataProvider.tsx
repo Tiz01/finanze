@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
-import type { Account, Budget, Category, Recurring, Reconciliation, Transaction } from '../domain/types';
+import type { Account, Budget, Category, ImportProfile, ImportRule, Recurring, Reconciliation, Transaction } from '../domain/types';
 import { SETTING_DEMO, SETTING_LAST_BACKUP } from './data';
 import { db } from './db';
 
@@ -11,6 +11,8 @@ export interface AppData {
   recurring: Recurring[];
   reconciliations: Reconciliation[];
   budgets: Budget[];
+  importProfiles: ImportProfile[];
+  importRules: ImportRule[];
   settings: {
     demoLoaded: boolean;
     lastBackupAt?: string;
@@ -27,10 +29,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const recurring = useLiveQuery(() => db.recurring.toArray());
   const reconciliations = useLiveQuery(() => db.reconciliations.toArray());
   const budgets = useLiveQuery(() => db.budgets.toArray());
+  const importProfiles = useLiveQuery(() => db.importProfiles.toArray());
+  const importRules = useLiveQuery(() => db.importRules.toArray());
   const settings = useLiveQuery(() => db.settings.toArray());
 
   const value = useMemo<AppData | null>(() => {
-    if (!accounts || !categories || !transactions || !recurring || !reconciliations || !budgets || !settings) {
+    if (!accounts || !categories || !transactions || !recurring || !reconciliations || !budgets || !importProfiles || !importRules || !settings) {
       return null;
     }
     const read = (key: string) => settings.find((row) => row.key === key)?.value;
@@ -42,12 +46,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
       recurring,
       reconciliations,
       budgets: [...budgets].sort((a, b) => a.order - b.order),
+      importProfiles,
+      importRules,
       settings: {
         demoLoaded: read(SETTING_DEMO) === true,
         lastBackupAt: typeof lastBackupAt === 'string' ? lastBackupAt : undefined,
       },
     };
-  }, [accounts, categories, transactions, recurring, reconciliations, budgets, settings]);
+  }, [accounts, categories, transactions, recurring, reconciliations, budgets, importProfiles, importRules, settings]);
 
   // Trasparente: iOS campiona qui il colore della barra di stato, che deve restare quello dell'intestazione.
   if (!value) return <main className="min-h-0 flex-1" />;

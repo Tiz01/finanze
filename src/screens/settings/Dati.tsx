@@ -9,14 +9,14 @@ import {
   SETTING_LAST_BACKUP,
 } from '../../db/data';
 import { useData } from '../../db/DataProvider';
-import { buildBackup, parseBackup, serializeBackup, summarizeData, type BackupFile, type BackupSummary } from '../../domain/backup';
+import { parseBackup, summarizeData, type BackupFile, type BackupSummary } from '../../domain/backup';
 import { transactionsToCsv } from '../../domain/csv';
 import { formatFullDate, toIsoDate, todayIso } from '../../domain/dates';
 import { routeHref } from '../../router';
 import { Button, Field, ListGroup, SectionTitle, TextInput } from '../../ui/controls';
 import { forgetUndo, notify, notifyError } from '../../ui/feedback';
 import { Screen } from '../../ui/Screen';
-import { shareOrDownload } from '../../ui/shareFile';
+import { backupFile, shareOrDownload } from '../../ui/shareFile';
 import { Sheet } from '../../ui/Sheet';
 
 const CLEAR_WORD = 'CANCELLA';
@@ -163,11 +163,8 @@ export function Dati() {
 
   async function exportBackup() {
     if (!snapshot) return;
-    const file = new File([serializeBackup(buildBackup(snapshot))], `finanze-backup-${todayIso()}.json`, {
-      type: 'application/json',
-    });
     try {
-      const outcome = await shareOrDownload(file);
+      const outcome = await shareOrDownload(backupFile(snapshot));
       if (outcome === 'cancelled') return;
       await setSetting(SETTING_LAST_BACKUP, new Date().toISOString());
       notify('Backup esportato');

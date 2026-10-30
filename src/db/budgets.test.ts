@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { buildBackup, parseBackup, serializeBackup } from '../domain/backup';
 import { budgetProgress } from '../domain/budgets';
 import { DEFAULT_CATEGORIES } from '../domain/categories';
-import { createAccount, type AccountDraft } from './accounts';
+import { createAccount, deleteAccount, type AccountDraft } from './accounts';
 import { createBudget, deleteBudget, updateBudget, type BudgetDraft } from './budgets';
 import { createCategory, deleteCategory } from './categories';
 import { clearAllData, readAllData, replaceAllData } from './data';
@@ -125,6 +125,36 @@ describe('gestione delle buste', () => {
     const id = await createBudget(draft);
     const saved = await db.budgets.get(id);
     expect(saved).toMatchObject({ name: 'Casa', kind: 'tetto', amountCents: 50000, categoryIds: ['cat-casa'], order: 5 });
+  });
+
+  it('una busta su un conto non ha categorie e tiene il conto', async () => {
+    const id = await createBudget({ name: 'Svago', kind: 'tetto', amountCents: 100, categoryIds: ['cat-viaggi'], accountId: 'conto' });
+    const saved = await db.budgets.get(id);
+    expect(saved?.accountId).toBe('conto');
+    expect(saved?.categoryIds).toEqual([]);
+  });
+
+  it('togliendo il conto la busta torna sulle categorie', async () => {
+    const id = await createBudget({ name: 'Svago', kind: 'tetto', amountCents: 100, categoryIds: [], accountId: 'conto' });
+    await updateBudget(id, { name: 'Svago', kind: 'tetto', amountCents: 100, categoryIds: ['cat-viaggi'], accountId: '' });
+    const saved = await db.budgets.get(id);
+    expect(saved?.accountId).toBeUndefined();
+    expect(saved?.categoryIds).toEqual(['cat-viaggi']);
+  });
+
+  it('eliminando il conto la busta non resta legata a un conto che non c’è', async () => {
+    const accountId = await createAccount({
+      name: 'Svago',
+      type: 'corrente',
+      currency: 'EUR',
+      initialBalanceCents: 0,
+      initialBalanceDate: '2026-10-01',
+      archived: false,
+      contaComeLiquidita: true,
+    });
+    const id = await createBudget({ name: 'Svago', kind: 'tetto', amountCents: 100, categoryIds: [], accountId });
+    await deleteAccount(accountId);
+    expect((await db.budgets.get(id))?.accountId).toBeUndefined();
   });
 
   it('un obiettivo non ha categorie', async () => {

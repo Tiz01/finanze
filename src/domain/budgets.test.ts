@@ -169,3 +169,52 @@ describe('defaultBudgets', () => {
     expect(defaultBudgets(without)[1]?.categoryIds).toEqual([]);
   });
 });
+
+describe('buste legate a un conto', () => {
+  const tettoSuConto: Budget = { ...tetto, categoryIds: [], accountId: 'b' };
+  const obiettivoSuConto: Budget = { ...obiettivo, accountId: 'b', amountCents: 20000 };
+
+  it('un tetto conta le uscite del conto qualunque sia la categoria, e solo quelle', () => {
+    const result = progress(tettoSuConto, [
+      spesa(1000, 'cat-ristoranti', { accountId: 'b' }),
+      spesa(2000, 'cat-spesa', { accountId: 'b' }),
+      spesa(9900, 'cat-ristoranti', { accountId: 'a' }),
+      tx({ type: 'trasferimento', amountCents: 30000, accountId: 'a', toAccountId: 'b' }),
+      tx({ type: 'trasferimento', amountCents: 500, accountId: 'b', toAccountId: 'a' }),
+    ]);
+    expect(result.usedCents).toBe(3000);
+    expect(result.remainingCents).toBe(27000);
+    expect(result.status).toBe('regolare');
+  });
+
+  it('un tetto su un conto è al netto dei rimborsi, ovunque arrivino', () => {
+    const cena = spesa(8000, 'cat-ristoranti', { accountId: 'b' });
+    const rimborso = tx({ type: 'entrata', amountCents: 3000, accountId: 'a', categoryId: 'cat-rimborsi', reimbursesId: cena.id });
+    expect(progress(tettoSuConto, [cena, rimborso]).usedCents).toBe(5000);
+  });
+
+  it('un tetto su un conto non guarda le categorie, anche se ne ha', () => {
+    const result = progress({ ...tettoSuConto, categoryIds: ['cat-ristoranti'] }, [spesa(700, 'cat-ristoranti', { accountId: 'a' })]);
+    expect(result.usedCents).toBe(0);
+  });
+
+  it('guarda solo il periodo', () => {
+    expect(progress(tettoSuConto, [spesa(1000, 'cat-spesa', { accountId: 'b', date: '2026-09-30' })]).usedCents).toBe(0);
+  });
+
+  it('un obiettivo su un conto conta i trasferimenti in arrivo e non i prelievi', () => {
+    const result = progress(obiettivoSuConto, [
+      tx({ type: 'trasferimento', amountCents: 20000, accountId: 'a', toAccountId: 'b' }),
+      tx({ type: 'trasferimento', amountCents: 15000, accountId: 'b', toAccountId: 'a' }),
+      tx({ type: 'entrata', amountCents: 800, accountId: 'b', categoryId: 'cat-straordinarie' }),
+    ]);
+    expect(result.usedCents).toBe(20000);
+    expect(result.status).toBe('raggiunto');
+  });
+
+  it('un obiettivo su un conto non conta i trasferimenti verso gli altri', () => {
+    const result = progress(obiettivoSuConto, [tx({ type: 'trasferimento', amountCents: 10000, accountId: 'a', toAccountId: 'broker' })]);
+    expect(result.usedCents).toBe(0);
+    expect(result.status).toBe('in-corso');
+  });
+});
