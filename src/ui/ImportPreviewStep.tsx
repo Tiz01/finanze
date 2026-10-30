@@ -246,7 +246,10 @@ export function ImportPreviewStep({
 
       {doubtful > 0 && (
         <p className="mt-3 rounded-2xl bg-surface px-4 py-3 text-sm">
-          {doubtful === 1 ? '1 movimento sembra già inserito' : `${doubtful} movimenti sembrano già inseriti`}: stesso conto, stesso importo, data vicina. Li ho esclusi; se non sono gli stessi riattivali da <span className="font-medium">Escluse</span>.
+          {doubtful === 1
+            ? '1 movimento sembra già inserito: stesso conto, stesso importo, data vicina. L’ho escluso; se non è lo stesso riattivalo da '
+            : `${doubtful} movimenti sembrano già inseriti: stesso conto, stesso importo, data vicina. Li ho esclusi; se non sono gli stessi riattivali da `}
+          <span className="font-medium">Escluse</span>.
         </p>
       )}
       {beforeStart > 0 && (

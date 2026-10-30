@@ -175,7 +175,7 @@ export function Importa() {
 
   if (draft && preview) {
     return (
-      <Screen title="Anteprima" action={cancel}>
+      <Screen key="anteprima" title="Anteprima" action={cancel}>
         <ImportPreviewStep
           rows={preview.rows}
           skipped={preview.skipped}
@@ -191,7 +191,7 @@ export function Importa() {
 
   if (draft) {
     return (
-      <Screen title="Colonne del file" action={cancel}>
+      <Screen key="colonne" title="Colonne del file" action={cancel}>
         <ImportMappingStep draft={draft} onChange={setDraft} onContinue={() => showPreview(draft)} />
       </Screen>
     );
