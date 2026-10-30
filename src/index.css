@@ -11,6 +11,11 @@
   --positive: #0f766e;
   --danger: #b42318;
   --on-danger: #ffffff;
+  --series-1: #0b8f82;
+  --series-2: #eb6834;
+  --good: #0ca30c;
+  --warning: #fab219;
+  --critical: #d03b3b;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -25,6 +30,8 @@
     --positive: #2dd4bf;
     --danger: #f97066;
     --on-danger: #2a0a06;
+    --series-1: #14a08f;
+    --series-2: #d95926;
   }
 }
 
@@ -39,6 +46,11 @@
   --color-positive: var(--positive);
   --color-danger: var(--danger);
   --color-on-danger: var(--on-danger);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-good: var(--good);
+  --color-warning: var(--warning);
+  --color-critical: var(--critical);
 }
 
 @utility pt-safe {

@@ -3,7 +3,9 @@ import {
   applyKeypadKey,
   centsToKeypadInput,
   formatCents,
+  formatCentsRounded,
   formatKeypadInput,
+  formatOneDecimal,
   formatRate,
   formatSignedCents,
   keypadInputToCents,
@@ -143,3 +145,27 @@ describe('formatRate', () => {
     expect(formatRate(-0.001)).toBe('0%');
   });
 });
+
+describe('formatOneDecimal', () => {
+  it('usa la virgola e un solo decimale', () => {
+    expect(formatOneDecimal(2.5)).toBe('2,5');
+    expect(formatOneDecimal(3)).toBe('3,0');
+    expect(formatOneDecimal(1.26)).toBe('1,3');
+  });
+});
+
+describe('formatCentsRounded', () => {
+  it('arrotonda agli euro interi e separa le migliaia', () => {
+    expect(formatCentsRounded(0)).toBe(`0${NBSP}€`);
+    expect(formatCentsRounded(80000)).toBe(`800${NBSP}€`);
+    expect(formatCentsRounded(100000)).toBe(`1.000${NBSP}€`);
+    expect(formatCentsRounded(450050)).toBe(`4.501${NBSP}€`);
+    expect(formatCentsRounded(-250000)).toBe(`${MINUS}2.500${NBSP}€`);
+    expect(formatCentsRounded(12000000)).toBe(`120.000${NBSP}€`);
+  });
+
+  it('non scrive mai meno zero', () => {
+    expect(formatCentsRounded(-20)).toBe(`0${NBSP}€`);
+  });
+});
+

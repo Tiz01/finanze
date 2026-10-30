@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie';
+import { defaultBudgets } from '../domain/budgets';
 import { DEFAULT_CATEGORIES } from '../domain/categories';
 import type {
   Account,
@@ -41,8 +42,18 @@ class FinanzeDB extends Dexie {
       holdings: 'id, accountId, isin',
       settings: 'key',
     });
+    // La prima versione non permetteva di creare buste: chi aggiorna riceve quelle iniziali.
+    this.version(2)
+      .stores({})
+      .upgrade(async (transaction) => {
+        const budgets = transaction.table('budgets');
+        if ((await budgets.count()) > 0) return;
+        const categoryIds = await transaction.table('categories').toCollection().primaryKeys();
+        await budgets.bulkAdd(defaultBudgets(new Set(categoryIds as string[])));
+      });
     this.on('populate', (transaction) => {
       void transaction.table('categories').bulkAdd([...DEFAULT_CATEGORIES]);
+      void transaction.table('budgets').bulkAdd(defaultBudgets(new Set(DEFAULT_CATEGORIES.map(({ id }) => id))));
     });
   }
 }

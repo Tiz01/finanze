@@ -114,10 +114,13 @@ export function Segmented<T extends string>({
   options,
   value,
   onChange,
+  fitLabels = false,
 }: {
   options: readonly { value: T; label: string }[];
   value: T;
   onChange: (value: T) => void;
+  /** Larghezze in base alle etichette invece che uguali. */
+  fitLabels?: boolean;
 }) {
   return (
     <div role="radiogroup" className="flex gap-1 rounded-xl bg-bg p-1">
@@ -128,7 +131,7 @@ export function Segmented<T extends string>({
           role="radio"
           aria-checked={option.value === value}
           onClick={() => onChange(option.value)}
-          className={`min-h-10 flex-1 rounded-lg px-2 text-sm font-medium ${
+          className={`min-h-10 rounded-lg px-2 text-sm font-medium ${fitLabels ? 'flex-auto' : 'flex-1'} ${
             option.value === value ? 'bg-surface shadow-sm' : 'text-muted'
           }`}
         >

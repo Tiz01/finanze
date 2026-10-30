@@ -1,3 +1,4 @@
+import { defaultBudgets } from './budgets';
 import { daysBetween, isValidIsoDate, toIsoDate } from './dates';
 import { validateRule } from './recurring';
 import { compareNewestFirst, validateTransaction } from './transactions';
@@ -17,7 +18,7 @@ import {
 } from './types';
 
 /** Stessa versione dello schema Dexie: va aumentata insieme a ogni migrazione. */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const APP_ID = 'finanze';
 
@@ -73,7 +74,17 @@ function isNonEmptyString(value: unknown): value is string {
 }
 
 // Le trasformazioni da una versione alla successiva: la chiave è la versione di partenza.
-const MIGRATIONS: Record<number, (data: Record<string, unknown>) => Record<string, unknown>> = {};
+const MIGRATIONS: Record<number, (data: Record<string, unknown>) => Record<string, unknown>> = {
+  // Nella versione 1 non si potevano creare buste: si parte da quelle iniziali.
+  1(data) {
+    const { budgets, categories } = data;
+    if (Array.isArray(budgets) && budgets.length > 0) return data;
+    const categoryIds = Array.isArray(categories)
+      ? categories.filter(isRecord).map((category) => String(category.id))
+      : [];
+    return { ...data, budgets: defaultBudgets(new Set(categoryIds)) };
+  },
+};
 
 export function parseBackup(text: string): BackupParseResult {
   const fail = (error: string): BackupParseResult => ({ ok: false, error });
@@ -175,6 +186,16 @@ function recurringProblem(recurring: Recurring, accountIds: Set<string>, categor
   return null;
 }
 
+function budgetProblem(budget: Budget, categoryIds: Set<string>): string | null {
+  if (!isNonEmptyString(budget.name)) return 'manca il nome';
+  if (budget.kind !== 'tetto' && budget.kind !== 'obiettivo') return 'il tipo non è valido';
+  if (!Number.isSafeInteger(budget.amountCents) || budget.amountCents <= 0) return 'l’importo non è valido';
+  if (!Array.isArray(budget.categoryIds)) return 'le categorie non sono valide';
+  if (!budget.categoryIds.every((id) => categoryIds.has(id))) return 'una categoria non esiste';
+  if (typeof budget.order !== 'number') return 'l’ordine non è valido';
+  return null;
+}
+
 function findProblem(data: BackupData): string | null {
   for (const account of data.accounts) {
     const problem = accountProblem(account);
@@ -221,6 +242,11 @@ function findProblem(data: BackupData): string | null {
     if (reconciliation.adjustmentId && !movementIds.has(reconciliation.adjustmentId)) {
       return `${label}: la rettifica collegata non esiste.`;
     }
+  }
+
+  for (const budget of data.budgets) {
+    const problem = budgetProblem(budget, categoryIds);
+    if (problem) return `Busta «${String(budget.name)}»: ${problem}.`;
   }
 
   for (const recurring of data.recurring) {

@@ -70,7 +70,9 @@ export interface Budget {
   name: string;
   kind: 'tetto' | 'obiettivo';
   amountCents: number;
+  /** Solo per un tetto: un obiettivo si misura sui trasferimenti verso i conti investimento. */
   categoryIds: string[];
+  order: number;
 }
 
 export type RecurringTemplate = Pick<

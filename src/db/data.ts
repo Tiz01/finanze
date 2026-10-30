@@ -1,5 +1,6 @@
 import { buildDemoData } from '../demo/demoData';
 import { BACKUP_TABLES, type BackupData } from '../domain/backup';
+import { defaultBudgets } from '../domain/budgets';
 import { DEFAULT_CATEGORIES } from '../domain/categories';
 import type { IsoDate } from '../domain/types';
 import { db } from './db';
@@ -68,6 +69,7 @@ export async function clearAllData(): Promise<void> {
   await db.transaction('rw', db.tables, async () => {
     await Promise.all(db.tables.map((table) => table.clear()));
     await db.categories.bulkAdd([...DEFAULT_CATEGORIES]);
+    await db.budgets.bulkAdd(defaultBudgets(new Set(DEFAULT_CATEGORIES.map(({ id }) => id))));
   });
 }
 

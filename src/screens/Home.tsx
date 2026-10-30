@@ -2,16 +2,19 @@ import { useMemo } from 'react';
 import { useData } from '../db/DataProvider';
 import { backupReminder } from '../domain/backup';
 import { computeBalances, liquidityCents } from '../domain/balances';
+import { budgetProgress } from '../domain/budgets';
 import { formatMonthYear, startOfMonth } from '../domain/dates';
 import { formatCents, formatRate } from '../domain/money';
 import { lastVerifiedDate, verifiedLabel } from '../domain/reconcile';
 import { summarizePeriod } from '../domain/reports';
 import type { Account } from '../domain/types';
 import { routeHref } from '../router';
+import { BudgetList } from '../ui/BudgetList';
 import { ButtonLink, ListGroup, SectionTitle } from '../ui/controls';
 import { openReconcile } from '../ui/reconcileStore';
 import { RecurringCard } from '../ui/RecurringCard';
 import { Screen } from '../ui/Screen';
+import { StatGrid, StatTile } from '../ui/stats';
 import { useToday } from '../ui/useToday';
 
 function AccountRow({
@@ -39,23 +42,17 @@ function AccountRow({
   );
 }
 
-function MonthTile({ label, value, negative = false }: { label: string; value: string; negative?: boolean }) {
-  return (
-    <div className="min-w-0 px-4 py-3">
-      <dt className="truncate text-xs text-muted">{label}</dt>
-      <dd className={`truncate text-lg font-semibold tabular-nums ${negative ? 'text-danger' : ''}`}>{value}</dd>
-    </div>
-  );
-}
-
 export function Home() {
-  const { accounts, transactions, reconciliations, settings } = useData();
+  const data = useData();
+  const { accounts, budgets, reconciliations, settings, transactions } = data;
   const today = useToday();
 
   const balances = useMemo(() => computeBalances(accounts, transactions, today), [accounts, transactions, today]);
-  const month = useMemo(() => summarizePeriod(transactions, startOfMonth(today), today), [transactions, today]);
+  const month = useMemo(() => summarizePeriod(data, startOfMonth(today), today), [data, today]);
+  const envelopes = useMemo(() => budgetProgress(budgets, data, startOfMonth(today), today), [budgets, data, today]);
 
   const liquidity = liquidityCents(accounts, balances);
+  const liquidityText = formatCents(liquidity);
   const active = accounts.filter((account) => !account.archived);
   const liquid = active.filter((account) => account.contaComeLiquidita);
   const others = active.filter((account) => !account.contaComeLiquidita);
@@ -77,7 +74,9 @@ export function Home() {
       hero={
         <>
           <h1 className="text-sm font-medium text-muted">Liquidità disponibile</h1>
-          <p className={`text-4xl font-bold tabular-nums ${liquidity < 0 ? 'text-danger' : ''}`}>{formatCents(liquidity)}</p>
+          <p className={`font-bold ${liquidityText.length > 11 ? 'text-4xl' : 'text-5xl'} ${liquidity < 0 ? 'text-danger' : ''}`}>
+            {liquidityText}
+          </p>
         </>
       }
     >
@@ -130,22 +129,29 @@ export function Home() {
 
       <SectionTitle>{formatMonthYear(today)}</SectionTitle>
       <div className="rounded-2xl bg-surface">
-        <dl className="grid grid-cols-2 [&>*:nth-child(even)]:border-l [&>*:nth-child(even)]:border-line [&>*:nth-child(n+3)]:border-t [&>*:nth-child(n+3)]:border-line">
-          <MonthTile label="Entrate" value={formatCents(month.incomeCents)} />
-          <MonthTile label="Uscite" value={formatCents(month.expenseCents)} />
-          <MonthTile label="Risparmio netto" value={formatCents(month.savingsCents)} negative={month.savingsCents < 0} />
-          <MonthTile
+        <StatGrid>
+          <StatTile label="Entrate" value={formatCents(month.incomeCents)} />
+          <StatTile label="Uscite" value={formatCents(month.expenseCents)} />
+          <StatTile label="Risparmio netto" value={formatCents(month.savingsCents)} negative={month.savingsCents < 0} />
+          <StatTile
             label="Tasso di risparmio"
             value={month.savingsRate === null ? '—' : formatRate(month.savingsRate)}
             negative={month.savingsCents < 0}
           />
-        </dl>
+        </StatGrid>
         {month.adjustmentCents !== 0 && (
           <p className="border-t border-line px-4 py-2 text-xs text-muted">
             Il risparmio comprende {formatCents(month.adjustmentCents)} di rettifiche.
           </p>
         )}
       </div>
+
+      {envelopes.length > 0 && (
+        <>
+          <SectionTitle>Buste del mese</SectionTitle>
+          <BudgetList progress={envelopes} />
+        </>
+      )}
     </Screen>
   );
 }

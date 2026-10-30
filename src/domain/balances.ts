@@ -1,4 +1,21 @@
+import { addDays } from './dates';
 import type { Account, IsoDate, Transaction } from './types';
+
+/** Di quanto un movimento cambia i conti che tocca. */
+function balanceEffects({ accountId, amountCents, toAccountId, type }: Transaction): [string | undefined, number][] {
+  switch (type) {
+    case 'entrata':
+    case 'rettifica':
+      return [[accountId, amountCents]];
+    case 'uscita':
+      return [[accountId, -amountCents]];
+    case 'trasferimento':
+      return [
+        [accountId, -amountCents],
+        [toAccountId, amountCents],
+      ];
+  }
+}
 
 /**
  * I saldi non vengono mai salvati: si ricalcolano da saldo iniziale e movimenti.
@@ -17,28 +34,13 @@ export function computeBalances(
     startDates.set(account.id, account.initialBalanceDate);
   }
 
-  const apply = (accountId: string | undefined, date: IsoDate, delta: number) => {
-    if (accountId === undefined) return;
-    const start = startDates.get(accountId);
-    if (start === undefined || date < start) return;
-    balances.set(accountId, (balances.get(accountId) ?? 0) + delta);
-  };
-
   for (const transaction of transactions) {
     if (transaction.date > asOf) continue;
-    const { accountId, toAccountId, amountCents, date, type } = transaction;
-    switch (type) {
-      case 'entrata':
-      case 'rettifica':
-        apply(accountId, date, amountCents);
-        break;
-      case 'uscita':
-        apply(accountId, date, -amountCents);
-        break;
-      case 'trasferimento':
-        apply(accountId, date, -amountCents);
-        apply(toAccountId, date, amountCents);
-        break;
+    for (const [accountId, delta] of balanceEffects(transaction)) {
+      if (accountId === undefined) continue;
+      const start = startDates.get(accountId);
+      if (start === undefined || transaction.date < start) continue;
+      balances.set(accountId, (balances.get(accountId) ?? 0) + delta);
     }
   }
   return balances;
@@ -51,4 +53,78 @@ export function liquidityCents(accounts: Account[], balances: Map<string, number
     if (account.contaComeLiquidita && !account.archived) total += balances.get(account.id) ?? 0;
   }
   return total;
+}
+
+export interface LiquidityPoint {
+  date: IsoDate;
+  cents: number;
+}
+
+const MAX_SERIES_POINTS = 400;
+
+/**
+ * La liquidità giorno per giorno, dalla prima data in cui esiste un saldo.
+ * Conta gli stessi conti di `liquidityCents`: un conto entra nella serie alla data del suo saldo iniziale.
+ */
+export function liquiditySeries(
+  accounts: Account[],
+  transactions: Transaction[],
+  from: IsoDate,
+  to: IsoDate,
+): LiquidityPoint[] {
+  const liquid = accounts.filter((account) => account.contaComeLiquidita && !account.archived);
+  if (liquid.length === 0) return [];
+
+  const startDates = new Map(liquid.map((account) => [account.id, account.initialBalanceDate]));
+  const changes = new Map<IsoDate, number>();
+  const change = (date: IsoDate, delta: number) => changes.set(date, (changes.get(date) ?? 0) + delta);
+
+  for (const account of liquid) change(account.initialBalanceDate, account.initialBalanceCents);
+  for (const transaction of transactions) {
+    for (const [accountId, delta] of balanceEffects(transaction)) {
+      if (accountId === undefined) continue;
+      const start = startDates.get(accountId);
+      if (start !== undefined && transaction.date >= start) change(transaction.date, delta);
+    }
+  }
+
+  const firstDate = [...startDates.values()].reduce((first, date) => (date < first ? date : first));
+  const start = from > firstDate ? from : firstDate;
+  if (start > to) return [];
+
+  let running = 0;
+  for (const [date, delta] of changes) {
+    if (date < start) running += delta;
+  }
+
+  const points: LiquidityPoint[] = [];
+  for (let date = start; date <= to; date = addDays(date, 1)) {
+    running += changes.get(date) ?? 0;
+    points.push({ date, cents: running });
+  }
+  return thinOut(points, MAX_SERIES_POINTS);
+}
+
+/** Tiene al più `limit` punti a distanza regolare, sempre compresi il primo e l'ultimo. */
+export function thinOut<T>(points: T[], limit: number): T[] {
+  if (points.length <= limit) return points;
+  const kept: T[] = [];
+  const step = (points.length - 1) / (limit - 1);
+  for (let index = 0; index < limit; index += 1) {
+    const point = points[Math.round(index * step)];
+    if (point !== undefined) kept.push(point);
+  }
+  return kept;
+}
+
+/** Tacche tonde per l'asse dei saldi: passi da 1, 2 o 5 × 10ⁿ che comprendono tutti i valori, mai sotto l'euro. */
+export function axisTicks(minCents: number, maxCents: number, count = 4): number[] {
+  const rough = Math.max(maxCents - minCents, 300) / (count - 1);
+  const power = 10 ** Math.floor(Math.log10(rough));
+  const step = [power, 2 * power, 5 * power].find((candidate) => candidate >= rough) ?? 10 * power;
+  const first = Math.floor(minCents / step) * step;
+  const last = Math.max(Math.ceil(maxCents / step) * step, first + step);
+  const ticks: number[] = [];
+  for (let tick = first; tick <= last; tick += step) ticks.push(tick);
+  return ticks;
 }

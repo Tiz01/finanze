@@ -45,7 +45,7 @@ export function AmountField({ title, cents, onChange, allowNegative = false }: A
       </button>
       {open && (
         <Sheet title={title} onClose={() => setOpen(false)}>
-          <p className="py-3 text-center text-4xl font-semibold tabular-nums">
+          <p className="py-3 text-center text-4xl font-semibold">
             {negative ? '−' : ''}
             {formatKeypadInput(input)}&nbsp;€
           </p>

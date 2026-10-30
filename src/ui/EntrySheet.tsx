@@ -197,7 +197,7 @@ function EntryForm({ request }: { request: EntryRequest }) {
 
         <div className="text-center">
           <p
-            className={`text-4xl font-semibold tabular-nums ${type === 'entrata' ? 'text-positive' : ''} ${
+            className={`text-4xl font-semibold ${type === 'entrata' ? 'text-positive' : ''} ${
               input === '' ? 'opacity-40' : ''
             }`}
           >

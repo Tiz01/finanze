@@ -9,7 +9,7 @@ import {
   type BackupData,
 } from './backup';
 import { DEFAULT_CATEGORIES } from './categories';
-import type { Account, Recurring, Reconciliation, Transaction } from './types';
+import type { Account, Budget, Recurring, Reconciliation, Transaction } from './types';
 
 const account: Account = {
   id: 'a',
@@ -231,3 +231,51 @@ describe('backupReminder', () => {
     expect(backupReminder(atNoon('2026-10-15'), true, today)).toEqual({ kind: 'old', days: 15 });
   });
 });
+
+describe('parseBackup: buste', () => {
+  const budget: Budget = { id: 'b', name: 'Viaggi', kind: 'tetto', amountCents: 20000, categoryIds: ['cat-viaggi'], order: 1 };
+
+  it('conserva le buste di un backup attuale, anche se sono vuote', () => {
+    const conBusta = parseBackup(serialized({ budgets: [budget] }));
+    expect(conBusta.ok && conBusta.backup.data.budgets).toEqual([budget]);
+    const senza = parseBackup(serialized({ budgets: [] }));
+    expect(senza.ok && senza.backup.data.budgets).toEqual([]);
+  });
+
+  it('rifiuta buste non coerenti', () => {
+    expect(errorOf(serialized({ budgets: [{ ...budget, name: '' }] }))).toMatch(/nome/);
+    expect(errorOf(serialized({ budgets: [{ ...budget, kind: 'boh' as never }] }))).toMatch(/tipo/);
+    expect(errorOf(serialized({ budgets: [{ ...budget, amountCents: 0 }] }))).toMatch(/importo/);
+    expect(errorOf(serialized({ budgets: [{ ...budget, amountCents: 1.5 }] }))).toMatch(/importo/);
+    expect(errorOf(serialized({ budgets: [{ ...budget, categoryIds: ['x'] }] }))).toMatch(/categoria non esiste/);
+    expect(errorOf(serialized({ budgets: [{ ...budget, categoryIds: 'x' as never }] }))).toMatch(/categorie/);
+  });
+
+  describe('dalla versione 1', () => {
+    function versionOne(fields: Partial<BackupData> = {}): string {
+      const file = JSON.parse(serialized(fields));
+      file.schemaVersion = 1;
+      return JSON.stringify(file);
+    }
+
+    it('aggiunge le buste iniziali e porta il file alla versione attuale', () => {
+      const result = parseBackup(versionOne());
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.backup.schemaVersion).toBe(SCHEMA_VERSION);
+      expect(result.backup.data.budgets.map((item) => item.name)).toEqual(['Svago + spese', 'Viaggi', 'Spese previste', 'PAC ETF']);
+    });
+
+    it('toglie dalle buste le categorie che nel file non ci sono', () => {
+      const categories = DEFAULT_CATEGORIES.filter((category) => category.id !== 'cat-viaggi');
+      const result = parseBackup(versionOne({ categories }));
+      expect(result.ok && result.backup.data.budgets[1]?.categoryIds).toEqual([]);
+    });
+
+    it('non tocca buste già presenti', () => {
+      const result = parseBackup(versionOne({ budgets: [budget] }));
+      expect(result.ok && result.backup.data.budgets).toEqual([budget]);
+    });
+  });
+});
+

@@ -46,6 +46,7 @@ function ReconcileForm({ account, request }: { account: Account; request: Reconc
   );
   const real = (negative ? -1 : 1) * keypadInputToCents(input);
   const difference = real - computed;
+  const isInvestment = account.type === 'investimento';
 
   async function save(createAdjustment: boolean) {
     try {
@@ -83,8 +84,10 @@ function ReconcileForm({ account, request }: { account: Account; request: Reconc
   if (step === 'amount') {
     return (
       <Sheet title={`Saldo reale di ${account.name}`} onClose={closeReconcile}>
-        <p className="text-center text-sm text-muted">Inserisci il saldo che vedi nell’app della banca.</p>
-        <p className={`py-3 text-center text-4xl font-semibold tabular-nums ${input === '' ? 'opacity-40' : ''}`}>
+        <p className="text-center text-sm text-muted">
+          {isInvestment ? 'Inserisci il valore che vedi nell’app del broker.' : 'Inserisci il saldo che vedi nell’app della banca.'}
+        </p>
+        <p className={`py-3 text-center text-4xl font-semibold ${input === '' ? 'opacity-40' : ''}`}>
           {negative ? '−' : ''}
           {formatKeypadInput(input)}&nbsp;€
         </p>
@@ -123,7 +126,7 @@ function ReconcileForm({ account, request }: { account: Account; request: Reconc
       <div className="space-y-3">
         <dl className="divide-y divide-line rounded-2xl bg-bg tabular-nums">
           <div className="flex items-center justify-between gap-3 px-4 py-2.5">
-            <dt>In banca</dt>
+            <dt>{isInvestment ? 'Valore reale' : 'In banca'}</dt>
             <dd>{formatCents(real)}</dd>
           </div>
           <div className="flex items-center justify-between gap-3 px-4 py-2.5">
@@ -147,6 +150,15 @@ function ReconcileForm({ account, request }: { account: Account; request: Reconc
             <p className="text-sm text-muted">Ora il saldo dell’app coincide con quello della banca.</p>
             <Button className="w-full" onClick={() => void save(false)}>
               Segna come verificato
+            </Button>
+          </>
+        ) : isInvestment ? (
+          <>
+            <p className="text-sm text-muted">
+              Di solito questa differenza è l’andamento del mercato: la registro come variazione, fuori dal risparmio.
+            </p>
+            <Button className="w-full" onClick={() => void save(true)}>
+              Registra variazione di {formatSignedCents(difference)}
             </Button>
           </>
         ) : (

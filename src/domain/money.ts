@@ -122,3 +122,14 @@ export function formatRate(rate: number): string {
   const percent = Math.round(rate * 100);
   return `${percent < 0 ? MINUS : ''}${Math.abs(percent)}%`;
 }
+
+/** Un numero con un decimale, per esempio i mesi di autonomia: 2,5. */
+export function formatOneDecimal(value: number): string {
+  return value.toFixed(1).replace('.', ',');
+}
+
+/** Per le scale dei grafici, in euro interi: 800 €, 4.500 €. */
+export function formatCentsRounded(cents: number): string {
+  const euros = Math.round(Math.abs(cents) / 100);
+  return `${cents < 0 && euros > 0 ? MINUS : ''}${groupThousands(String(euros))}${NBSP}€`;
+}

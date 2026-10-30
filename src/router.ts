@@ -8,6 +8,7 @@ export const ROUTES = [
   'impostazioni',
   'impostazioni/conti',
   'impostazioni/categorie',
+  'impostazioni/buste',
   'impostazioni/ricorrenze',
   'impostazioni/dati',
 ] as const;

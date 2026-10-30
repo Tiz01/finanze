@@ -122,10 +122,21 @@ describe('Aggiorna saldo reale', () => {
   it('la rettifica compare nel risparmio del mese, non tra le uscite', async () => {
     const accountId = await createAccount(accountDraft);
     await reconcileAccount({ accountId, date: today, realBalanceCents: 97500, createAdjustment: true });
-    const summary = summarizePeriod(await db.transactions.toArray(), '2026-10-01', today);
+    const summary = summarizePeriod(await readAllData(), '2026-10-01', today);
     expect(summary.adjustmentCents).toBe(-2500);
     expect(summary.expenseCents).toBe(0);
     expect(summary.savingsCents).toBe(-2500);
+  });
+
+  it('su un conto investimento la rettifica è una variazione di mercato, fuori dal risparmio', async () => {
+    const accountId = await createAccount({ ...accountDraft, name: 'Broker', type: 'investimento', contaComeLiquidita: false });
+    await reconcileAccount({ accountId, date: today, realBalanceCents: 107000, createAdjustment: true });
+    const [adjustment] = await db.transactions.toArray();
+    expect(adjustment?.note).toBe('Variazione di mercato');
+    const summary = summarizePeriod(await readAllData(), '2026-10-01', today);
+    expect(summary.marketCents).toBe(7000);
+    expect(summary.adjustmentCents).toBe(0);
+    expect(summary.savingsCents).toBe(0);
   });
 
   it('eliminando la rettifica la verifica resta senza collegamento; annullando torna tutto', async () => {
@@ -246,7 +257,9 @@ describe('ricorrenze', () => {
     });
     await confirmOccurrence(id, today);
     expect(await balanceOf(brokerId)).toBe(10000);
-    expect(summarizePeriod(await db.transactions.toArray(), '2026-10-01', today).expenseCents).toBe(0);
+    const summary = summarizePeriod(await readAllData(), '2026-10-01', today);
+    expect(summary.expenseCents).toBe(0);
+    expect(summary.investedCents).toBe(10000);
   });
 
   it('rifiuta ricorrenze non valide', async () => {

@@ -338,6 +338,7 @@ describe('backup', () => {
     expect(data.transactions).toEqual([]);
     expect(data.settings).toEqual([]);
     expect(data.categories).toHaveLength(DEFAULT_CATEGORIES.length);
+    expect(data.budgets.map((budget) => budget.id).sort()).toEqual(['busta-pac', 'busta-previste', 'busta-svago', 'busta-viaggi']);
   });
 });
 

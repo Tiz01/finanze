@@ -30,7 +30,3 @@ export function Screen({ title, hero, back, action, children }: ScreenProps) {
     </>
   );
 }
-
-export function ComingSoon({ phase }: { phase: number }) {
-  return <p className="pt-8 text-center text-muted">Questa schermata arriva con la fase {phase}.</p>;
-}

@@ -1,9 +1,10 @@
+import { lazy, Suspense, type ComponentType } from 'react';
 import { DataProvider } from './db/DataProvider';
 import { tabOf, useRoute, type Route } from './router';
 import { Home } from './screens/Home';
 import { Impostazioni } from './screens/Impostazioni';
 import { Movimenti } from './screens/Movimenti';
-import { Report } from './screens/Report';
+import { Buste } from './screens/settings/Buste';
 import { Categorie } from './screens/settings/Categorie';
 import { Conti } from './screens/settings/Conti';
 import { Dati } from './screens/settings/Dati';
@@ -15,13 +16,17 @@ import { TabBar } from './ui/TabBar';
 import { ToastHost } from './ui/ToastHost';
 import { UpdateBanner } from './ui/UpdateBanner';
 
-const SCREENS: Record<Route, () => React.JSX.Element> = {
+// A parte, così la libreria dei grafici si carica solo quando serve.
+const Report = lazy(() => import('./screens/Report').then((module) => ({ default: module.Report })));
+
+const SCREENS: Record<Route, ComponentType> = {
   home: Home,
   movimenti: Movimenti,
   report: Report,
   impostazioni: Impostazioni,
   'impostazioni/conti': Conti,
   'impostazioni/categorie': Categorie,
+  'impostazioni/buste': Buste,
   'impostazioni/ricorrenze': Ricorrenze,
   'impostazioni/dati': Dati,
 };
@@ -35,7 +40,9 @@ export function App() {
       {/* Barra in basso e aggiornamenti restano fuori: un errore non deve impedire di ricevere una correzione. */}
       <ErrorBoundary key={route}>
         <DataProvider>
-          <Screen />
+          <Suspense fallback={<main className="min-h-0 flex-1" />}>
+            <Screen />
+          </Suspense>
           <EntrySheet />
           <ReconcileSheet />
         </DataProvider>

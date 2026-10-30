@@ -44,6 +44,7 @@ export async function reconcileAccount(input: ReconcileInput): Promise<Undo> {
         type: 'rettifica',
         accountId,
         categoryId: CATEGORY_IDS.nonTracciato,
+        ...(account.type === 'investimento' ? { note: 'Variazione di mercato' } : {}),
         createdAt: new Date().toISOString(),
       });
     }
