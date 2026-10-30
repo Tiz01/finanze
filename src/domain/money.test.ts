@@ -8,6 +8,7 @@ import {
   formatOneDecimal,
   formatRate,
   formatSignedCents,
+  formatSignedRate,
   keypadInputToCents,
   parseAmount,
   type KeypadKey,
@@ -151,6 +152,20 @@ describe('formatOneDecimal', () => {
     expect(formatOneDecimal(2.5)).toBe('2,5');
     expect(formatOneDecimal(3)).toBe('3,0');
     expect(formatOneDecimal(1.26)).toBe('1,3');
+  });
+});
+
+describe('formatSignedRate', () => {
+  it('mette sempre il segno e un decimale', () => {
+    expect(formatSignedRate(0.116)).toBe('+11,6%');
+    expect(formatSignedRate(-0.032)).toBe('−3,2%');
+    expect(formatSignedRate(1)).toBe('+100,0%');
+  });
+
+  it('non mette il segno a zero', () => {
+    expect(formatSignedRate(0)).toBe('0,0%');
+    expect(formatSignedRate(0.0001)).toBe('0,0%');
+    expect(formatSignedRate(-0.0001)).toBe('0,0%');
   });
 });
 

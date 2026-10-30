@@ -19,11 +19,13 @@ import { UpdateBanner } from './ui/UpdateBanner';
 
 // A parte, così la libreria dei grafici si carica solo quando serve.
 const Report = lazy(() => import('./screens/Report').then((module) => ({ default: module.Report })));
+const Investimenti = lazy(() => import('./screens/Investimenti').then((module) => ({ default: module.Investimenti })));
 // Anche la lettura dei file delle banche: serve di rado.
 const Importa = lazy(() => import('./screens/settings/Importa').then((module) => ({ default: module.Importa })));
 
 const SCREENS: Record<Route, ComponentType> = {
   home: Home,
+  'home/investimenti': Investimenti,
   movimenti: Movimenti,
   report: Report,
   impostazioni: Impostazioni,

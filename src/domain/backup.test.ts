@@ -56,6 +56,7 @@ function data(fields: Partial<BackupData> = {}): BackupData {
     importProfiles: [],
     importRules: [],
     holdings: [],
+    holdingSnapshots: [],
     settings: [{ key: 'lastBackupAt', value: '2026-02-03T20:00:00.000Z' }],
     ...fields,
   };
@@ -164,6 +165,7 @@ describe('summarizeData', () => {
     expect(summary.accounts).toBe(1);
     expect(summary.transactions).toBe(2);
     expect(summary.categories).toBe(DEFAULT_CATEGORIES.length);
+    expect(summary.holdings).toBe(0);
     expect(summary.firstDate).toBe('2026-02-01');
     expect(summary.lastDate).toBe('2026-02-03');
   });

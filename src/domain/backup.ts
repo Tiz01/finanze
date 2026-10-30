@@ -9,6 +9,7 @@ import {
   type Budget,
   type Category,
   type Holding,
+  type HoldingSnapshot,
   type ImportProfile,
   type ImportRule,
   type IsoDate,
@@ -19,7 +20,7 @@ import {
 } from './types';
 
 /** Stessa versione dello schema Dexie: va aumentata insieme a ogni migrazione. */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const APP_ID = 'finanze';
 
@@ -33,6 +34,7 @@ export interface BackupData {
   importProfiles: ImportProfile[];
   importRules: ImportRule[];
   holdings: Holding[];
+  holdingSnapshots: HoldingSnapshot[];
   settings: Setting[];
 }
 
@@ -46,6 +48,7 @@ export const BACKUP_TABLES = [
   'importProfiles',
   'importRules',
   'holdings',
+  'holdingSnapshots',
   'settings',
 ] as const satisfies readonly (keyof BackupData)[];
 
@@ -212,6 +215,20 @@ function importRuleProblem(rule: ImportRule, accountIds: Set<string>, categoryId
   return accountIds.has(rule.transferAccountId) ? null : 'il conto non esiste';
 }
 
+function holdingProblem(holding: Holding, accountIds: Set<string>): string | null {
+  if (!isNonEmptyString(holding.instrument)) return 'manca il nome';
+  if (typeof holding.isin !== 'string') return 'l’ISIN non è valido';
+  if (!accountIds.has(holding.accountId)) return 'il conto non esiste';
+  return isNonEmptyString(holding.createdAt) ? null : 'manca la data di inserimento';
+}
+
+function holdingSnapshotProblem(snapshot: HoldingSnapshot, holdingIds: Set<string>): string | null {
+  if (!holdingIds.has(snapshot.holdingId)) return 'lo strumento non esiste';
+  if (!isValidIsoDate(snapshot.date)) return 'la data non è valida';
+  const values = [snapshot.quantityMicros, snapshot.avgPriceMicros, snapshot.priceMicros];
+  return values.every((value) => Number.isSafeInteger(value) && value >= 0) ? null : 'quote o prezzi non sono validi';
+}
+
 function findProblem(data: BackupData): string | null {
   for (const account of data.accounts) {
     const problem = accountProblem(account);
@@ -275,13 +292,24 @@ function findProblem(data: BackupData): string | null {
     if (problem) return `Regola «${String(rule.contains)}»: ${problem}.`;
   }
 
+  for (const holding of data.holdings) {
+    const problem = holdingProblem(holding, accountIds);
+    if (problem) return `Strumento «${String(holding.instrument)}»: ${problem}.`;
+  }
+
+  const holdingIds = new Set(data.holdings.map((holding) => holding.id));
+  for (const snapshot of data.holdingSnapshots) {
+    const problem = holdingSnapshotProblem(snapshot, holdingIds);
+    if (problem) return `Aggiornamento del ${String(snapshot.date)} di uno strumento: ${problem}.`;
+  }
+
   for (const recurring of data.recurring) {
     const label = `Ricorrenza «${String(recurring.name)}»`;
     const problem = recurringProblem(recurring, accountIds, categoryIds);
     if (problem) return `${label}: ${problem}.`;
   }
 
-  for (const name of ['budgets', 'recurring', 'reconciliations', 'importProfiles', 'importRules', 'holdings'] as const) {
+  for (const name of ['budgets', 'recurring', 'reconciliations', 'importProfiles', 'importRules', 'holdings', 'holdingSnapshots'] as const) {
     const rows = data[name] as { id?: unknown }[];
     if (!rows.every((row) => isNonEmptyString(row.id))) return `La tabella ${name} ha righe senza identificatore.`;
     const duplicate = firstDuplicate(rows.map((row) => row.id));
@@ -297,16 +325,18 @@ export interface BackupSummary {
   accounts: number;
   categories: number;
   transactions: number;
+  holdings: number;
   firstDate?: IsoDate;
   lastDate?: IsoDate;
 }
 
-export function summarizeData(data: Pick<BackupData, 'accounts' | 'categories' | 'transactions'>): BackupSummary {
+export function summarizeData(data: Pick<BackupData, 'accounts' | 'categories' | 'transactions' | 'holdings'>): BackupSummary {
   const sorted = [...data.transactions].sort(compareNewestFirst);
   return {
     accounts: data.accounts.length,
     categories: data.categories.length,
     transactions: data.transactions.length,
+    holdings: data.holdings.length,
     firstDate: sorted[sorted.length - 1]?.date,
     lastDate: sorted[0]?.date,
   };

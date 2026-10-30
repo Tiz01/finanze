@@ -157,10 +157,27 @@ export interface ImportRule {
 export interface Holding {
   id: string;
   accountId: string;
+  /** Il nome o il codice dello strumento, come lo mostra il broker. */
   instrument: string;
+  /** Facoltativo: vuoto se non indicato. */
   isin: string;
-  quantity: number;
-  avgPriceCents: number;
+  createdAt: string;
+}
+
+/**
+ * Lo strumento a una certa data, con i numeri che mostra il broker: l'ultimo è la situazione di oggi.
+ * In milionesimi interi: quote e prezzi hanno più decimali dei centesimi, e i float sbaglierebbero i conti.
+ */
+export interface HoldingSnapshot {
+  /** `strumento|data`: un solo aggiornamento al giorno per strumento. */
+  id: string;
+  holdingId: string;
+  date: IsoDate;
+  quantityMicros: number;
+  /** Prezzo medio di carico, per quota. */
+  avgPriceMicros: number;
+  /** Prezzo di mercato a quella data, per quota. */
+  priceMicros: number;
 }
 
 export interface Setting {

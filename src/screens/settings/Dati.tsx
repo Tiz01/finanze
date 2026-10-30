@@ -78,6 +78,13 @@ function ImportPreview({
               <td className="py-1 text-right">{incoming.transactions}</td>
               <td className="py-1 text-right">{current.transactions}</td>
             </tr>
+            {(incoming.holdings > 0 || current.holdings > 0) && (
+              <tr>
+                <td className="py-1">Strumenti</td>
+                <td className="py-1 text-right">{incoming.holdings}</td>
+                <td className="py-1 text-right">{current.holdings}</td>
+              </tr>
+            )}
           </tbody>
         </table>
         {incoming.transactions > 0 && <p className="text-sm text-muted">Movimenti del file{periodText(incoming)}.</p>}
@@ -150,7 +157,7 @@ function ClearData({ onClose }: { onClose: () => void }) {
 }
 
 export function Dati() {
-  const { accounts, categories, transactions, settings } = useData();
+  const { accounts, categories, holdings, transactions, settings } = useData();
   // Letti in anticipo: l'esportazione deve partire subito dentro il tocco.
   const snapshot = useLiveQuery(readAllData);
   const [preview, setPreview] = useState<BackupFile | null>(null);
@@ -274,7 +281,7 @@ export function Dati() {
       {preview && (
         <ImportPreview
           backup={preview}
-          current={summarizeData({ accounts, categories, transactions })}
+          current={summarizeData({ accounts, categories, holdings, transactions })}
           onExportCurrent={() => void exportBackup()}
           onClose={() => setPreview(null)}
         />

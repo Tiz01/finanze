@@ -1,6 +1,17 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
-import type { Account, Budget, Category, ImportProfile, ImportRule, Recurring, Reconciliation, Transaction } from '../domain/types';
+import type {
+  Account,
+  Budget,
+  Category,
+  Holding,
+  HoldingSnapshot,
+  ImportProfile,
+  ImportRule,
+  Recurring,
+  Reconciliation,
+  Transaction,
+} from '../domain/types';
 import { SETTING_DEMO, SETTING_LAST_BACKUP } from './data';
 import { db } from './db';
 
@@ -13,6 +24,8 @@ export interface AppData {
   budgets: Budget[];
   importProfiles: ImportProfile[];
   importRules: ImportRule[];
+  holdings: Holding[];
+  holdingSnapshots: HoldingSnapshot[];
   settings: {
     demoLoaded: boolean;
     lastBackupAt?: string;
@@ -31,10 +44,24 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const budgets = useLiveQuery(() => db.budgets.toArray());
   const importProfiles = useLiveQuery(() => db.importProfiles.toArray());
   const importRules = useLiveQuery(() => db.importRules.toArray());
+  const holdings = useLiveQuery(() => db.holdings.toArray());
+  const holdingSnapshots = useLiveQuery(() => db.holdingSnapshots.toArray());
   const settings = useLiveQuery(() => db.settings.toArray());
 
   const value = useMemo<AppData | null>(() => {
-    if (!accounts || !categories || !transactions || !recurring || !reconciliations || !budgets || !importProfiles || !importRules || !settings) {
+    if (
+      !accounts ||
+      !categories ||
+      !transactions ||
+      !recurring ||
+      !reconciliations ||
+      !budgets ||
+      !importProfiles ||
+      !importRules ||
+      !holdings ||
+      !holdingSnapshots ||
+      !settings
+    ) {
       return null;
     }
     const read = (key: string) => settings.find((row) => row.key === key)?.value;
@@ -48,12 +75,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
       budgets: [...budgets].sort((a, b) => a.order - b.order),
       importProfiles,
       importRules,
+      holdings: [...holdings].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+      holdingSnapshots,
       settings: {
         demoLoaded: read(SETTING_DEMO) === true,
         lastBackupAt: typeof lastBackupAt === 'string' ? lastBackupAt : undefined,
       },
     };
-  }, [accounts, categories, transactions, recurring, reconciliations, budgets, importProfiles, importRules, settings]);
+  }, [accounts, categories, transactions, recurring, reconciliations, budgets, importProfiles, importRules, holdings, holdingSnapshots, settings]);
 
   // Trasparente: iOS campiona qui il colore della barra di stato, che deve restare quello dell'intestazione.
   if (!value) return <main className="min-h-0 flex-1" />;

@@ -20,15 +20,18 @@ export async function createAccount(draft: AccountDraft): Promise<string> {
 
 export async function updateAccount(id: string, draft: AccountDraft): Promise<void> {
   const prepared = prepare(draft);
-  await db.transaction('rw', db.accounts, async () => {
+  await db.transaction('rw', db.accounts, db.holdings, async () => {
     const previous = await db.accounts.get(id);
     if (!previous) throw new Error('Il conto non esiste più');
+    if (prepared.type !== 'investimento' && (await db.holdings.where('accountId').equals(id).count()) > 0) {
+      throw new Error('Il conto ha degli strumenti: per cambiare tipo togli prima quelli');
+    }
     await db.accounts.put({ ...prepared, id, createdAt: previous.createdAt });
   });
 }
 
 export async function deleteAccount(id: string): Promise<void> {
-  const tables = [db.accounts, db.transactions, db.reconciliations, db.recurring, db.budgets, db.importProfiles, db.importRules];
+  const tables = [db.accounts, db.transactions, db.reconciliations, db.recurring, db.budgets, db.importProfiles, db.importRules, db.holdings];
   await db.transaction('rw', tables, async () => {
     const usedByRecurring = await db.recurring
       .filter(({ template }) => template.accountId === id || template.toAccountId === id)
@@ -39,6 +42,9 @@ export async function deleteAccount(id: string): Promise<void> {
       (await db.transactions.where('toAccountId').equals(id).count()) +
       (await db.reconciliations.where('accountId').equals(id).count());
     if (used > 0) throw new Error('Il conto ha dei movimenti: puoi solo archiviarlo');
+    if ((await db.holdings.where('accountId').equals(id).count()) > 0) {
+      throw new Error('Il conto ha degli strumenti: togli prima quelli, oppure archivialo');
+    }
     await db.accounts.delete(id);
     await db.budgets
       .filter((budget) => budget.accountId === id)

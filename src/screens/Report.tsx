@@ -23,9 +23,9 @@ import {
 } from '../domain/reports';
 import type { Category } from '../domain/types';
 import { Field, SectionTitle, Segmented, TextInput } from '../ui/controls';
-import { LiquidityChart } from '../ui/LiquidityChart';
 import { Screen } from '../ui/Screen';
 import { StatGrid, StatTile } from '../ui/stats';
+import { ValueChart } from '../ui/ValueChart';
 import { useToday } from '../ui/useToday';
 
 const KIND_LABELS: Record<PeriodKind, string> = {
@@ -412,7 +412,7 @@ export function Report() {
 
       <Card title="Andamento della liquidità">
         {series.length >= 2 ? (
-          <LiquidityChart points={series} today={today} />
+          <ValueChart points={series} today={today} />
         ) : series[0] ? (
           <EmptyNote>
             Per ora c’è un solo giorno: {formatCents(series[0].cents)}. La linea compare dal secondo giorno dopo aver inserito i saldi dei conti.

@@ -2,7 +2,17 @@ import { computeBalances } from '../domain/balances';
 import { CATEGORY_IDS } from '../domain/categories';
 import { addDays, addMonths, startOfMonth } from '../domain/dates';
 import { firstOccurrenceOnOrAfter } from '../domain/recurring';
-import type { Account, IsoDate, Recurring, Reconciliation, Transaction, TransactionDraft } from '../domain/types';
+import { snapshotId } from '../domain/investments';
+import type {
+  Account,
+  Holding,
+  HoldingSnapshot,
+  IsoDate,
+  Recurring,
+  Reconciliation,
+  Transaction,
+  TransactionDraft,
+} from '../domain/types';
 
 // Dati inventati, caricati solo dal pulsante "Carica dati demo": non corrispondono a nessuna persona.
 
@@ -35,6 +45,8 @@ export function buildDemoData(today: IsoDate, now: Date = new Date()): {
   transactions: Transaction[];
   recurring: Recurring[];
   reconciliations: Reconciliation[];
+  holdings: Holding[];
+  holdingSnapshots: HoldingSnapshot[];
 } {
   const createdAt = (offset: number) => new Date(now.getTime() + offset).toISOString();
   const start = addMonths(startOfMonth(today), -(DEMO_MONTHS - 1));
@@ -149,5 +161,32 @@ export function buildDemoData(today: IsoDate, now: Date = new Date()): {
     },
   ];
 
-  return { accounts, transactions: allTransactions, recurring, reconciliations };
+  // Due strumenti inventati, con un aggiornamento al mese.
+  const holdings: Holding[] = [
+    { id: 'demo-etf-mondo', accountId: 'demo-broker', instrument: 'ETF Mondo (demo)', isin: '', createdAt: createdAt(5) },
+    { id: 'demo-etf-bond', accountId: 'demo-broker', instrument: 'ETF Obbligazioni 2028 (demo)', isin: '', createdAt: createdAt(6) },
+  ];
+  const history = (holdingId: string, rows: readonly (readonly [number, number, number])[]): HoldingSnapshot[] =>
+    rows.flatMap(([quantityMicros, avgPriceMicros, priceMicros], month) => {
+      const date = addMonths(start, month);
+      return date <= today
+        ? [{ id: snapshotId(holdingId, date), holdingId, date, quantityMicros, avgPriceMicros, priceMicros }]
+        : [];
+    });
+  const holdingSnapshots = [
+    ...history('demo-etf-mondo', [
+      [10_000_000, 100_000_000, 104_000_000],
+      [11_000_000, 100_360_000, 106_200_000],
+      [12_000_000, 100_750_000, 103_800_000],
+      [13_000_000, 101_120_000, 108_400_000],
+    ]),
+    ...history('demo-etf-bond', [
+      [20_000_000, 10_000_000, 10_050_000],
+      [20_000_000, 10_000_000, 10_120_000],
+      [20_000_000, 10_000_000, 10_180_000],
+      [20_000_000, 10_000_000, 10_210_000],
+    ]),
+  ];
+
+  return { accounts, transactions: allTransactions, recurring, reconciliations, holdings, holdingSnapshots };
 }

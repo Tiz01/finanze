@@ -24,6 +24,7 @@ export async function readAllData(): Promise<BackupData> {
       importProfiles,
       importRules,
       holdings,
+      holdingSnapshots,
       settings,
     ] = await Promise.all([
       db.accounts.toArray(),
@@ -35,6 +36,7 @@ export async function readAllData(): Promise<BackupData> {
       db.importProfiles.toArray(),
       db.importRules.toArray(),
       db.holdings.toArray(),
+      db.holdingSnapshots.toArray(),
       db.settings.toArray(),
     ]);
     return {
@@ -47,6 +49,7 @@ export async function readAllData(): Promise<BackupData> {
       importProfiles,
       importRules,
       holdings,
+      holdingSnapshots,
       settings,
     };
   });
@@ -75,13 +78,16 @@ export async function clearAllData(): Promise<void> {
 
 export async function loadDemoData(today: IsoDate): Promise<void> {
   const demo = buildDemoData(today);
-  await db.transaction('rw', db.accounts, db.transactions, db.recurring, db.reconciliations, db.settings, async () => {
+  const tables = [db.accounts, db.transactions, db.recurring, db.reconciliations, db.holdings, db.holdingSnapshots, db.settings];
+  await db.transaction('rw', tables, async () => {
     const existing = (await db.accounts.count()) + (await db.transactions.count());
     if (existing > 0) throw new Error('I dati demo si possono caricare solo su un’app vuota');
     await db.accounts.bulkAdd(demo.accounts);
     await db.transactions.bulkAdd(demo.transactions);
     await db.recurring.bulkAdd(demo.recurring);
     await db.reconciliations.bulkAdd(demo.reconciliations);
+    await db.holdings.bulkAdd(demo.holdings);
+    await db.holdingSnapshots.bulkAdd(demo.holdingSnapshots);
     await db.settings.put({ key: SETTING_DEMO, value: true });
   });
 }

@@ -4,7 +4,7 @@ const CURRENCY_SYMBOLS: Record<string, string> = { EUR: '€' };
 
 export const MAX_AMOUNT_CENTS = 99_999_999_999;
 
-function groupThousands(digits: string): string {
+export function groupThousands(digits: string): string {
   return digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 }
 
@@ -126,6 +126,13 @@ export function formatRate(rate: number): string {
 /** Un numero con un decimale, per esempio i mesi di autonomia: 2,5. */
 export function formatOneDecimal(value: number): string {
   return value.toFixed(1).replace('.', ',');
+}
+
+/** Una variazione con il segno e un decimale: +11,6%, −3,2%. */
+export function formatSignedRate(rate: number): string {
+  const percent = formatOneDecimal(Math.abs(rate) * 100);
+  if (percent === '0,0') return '0,0%';
+  return `${rate < 0 ? MINUS : '+'}${percent}%`;
 }
 
 /** Per le scale dei grafici, in euro interi: 800 €, 4.500 €. */

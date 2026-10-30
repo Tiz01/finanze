@@ -6,6 +6,7 @@ import type {
   Budget,
   Category,
   Holding,
+  HoldingSnapshot,
   ImportProfile,
   ImportRule,
   Recurring,
@@ -24,6 +25,7 @@ class FinanzeDB extends Dexie {
   importProfiles!: Table<ImportProfile, string>;
   importRules!: Table<ImportRule, string>;
   holdings!: Table<Holding, string>;
+  holdingSnapshots!: Table<HoldingSnapshot, string>;
   settings!: Table<Setting, string>;
 
   constructor() {
@@ -51,6 +53,8 @@ class FinanzeDB extends Dexie {
         const categoryIds = await transaction.table('categories').toCollection().primaryKeys();
         await budgets.bulkAdd(defaultBudgets(new Set(categoryIds as string[])));
       });
+    // Gli aggiornamenti di quote e prezzi degli investimenti: finora non si potevano inserire.
+    this.version(3).stores({ holdingSnapshots: 'id, holdingId, date' });
     this.on('populate', (transaction) => {
       void transaction.table('categories').bulkAdd([...DEFAULT_CATEGORIES]);
       void transaction.table('budgets').bulkAdd(defaultBudgets(new Set(DEFAULT_CATEGORIES.map(({ id }) => id))));
