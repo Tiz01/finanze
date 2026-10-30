@@ -3,10 +3,26 @@ import { DEFAULT_CATEGORIES } from './categories';
 import { applyRules, buildPreview, fallbackCategoryId, previewDrafts, summarizePreview, type PreviewContext, type PreviewRow } from './importPreview';
 import type { StatementRow } from './statementMapping';
 import { validateTransaction } from './transactions';
-import type { ImportRule, Transaction } from './types';
+import type { Account, ImportRule, Transaction } from './types';
 
 const categories = [...DEFAULT_CATEGORIES];
 const accountId = 'conto';
+
+function account(id: string): Account {
+  return {
+    id,
+    name: id,
+    type: 'corrente',
+    currency: 'EUR',
+    initialBalanceCents: 0,
+    initialBalanceDate: '2026-01-01',
+    archived: false,
+    contaComeLiquidita: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  };
+}
+
+const accounts = [account(accountId), account('deposito')];
 
 function row(fields: Partial<StatementRow> = {}): StatementRow {
   return { date: '2026-10-05', description: 'POS ROSSI', amountCents: -1000, ...fields };
@@ -28,7 +44,7 @@ function existing(fields: Partial<Transaction> = {}): Transaction {
 }
 
 function preview(rows: StatementRow[], fields: Partial<PreviewContext> = {}): PreviewRow[] {
-  return buildPreview(rows, { accountId, transactions: [], rules: [], categories, ...fields });
+  return buildPreview(rows, { accountId, accounts, transactions: [], rules: [], categories, ...fields });
 }
 
 /** Il risultato di aver già importato queste righe. */
@@ -182,10 +198,65 @@ describe('categorie', () => {
     const first = rows[0];
     if (!first) throw new Error('Manca la riga');
     rows[0] = { ...first, categoryId: 'cat-viaggi', edited: true };
-    const updated = applyRules(rows, [{ id: 'r', contains: 'bianchi', categoryId: 'cat-tecnologia' }], categories);
+    const updated = applyRules(rows, [{ id: 'r', contains: 'bianchi', categoryId: 'cat-tecnologia' }], { accountId, accounts, categories });
     expect(updated[0]?.categoryId).toBe('cat-viaggi');
     expect(updated[1]?.categoryId).toBe('cat-tecnologia');
     expect(updated[1]?.fromRule).toBe(true);
+  });
+});
+
+describe('trasferimenti da regola', () => {
+  const rules: ImportRule[] = [{ id: 'r', contains: 'deposito', transferAccountId: 'deposito' }];
+
+  it('una riga in uscita diventa un trasferimento verso quel conto', () => {
+    const [result] = preview([row({ description: 'BONIFICO VERSO DEPOSITO', amountCents: -20000 })], { rules });
+    expect(result).toMatchObject({ type: 'trasferimento', otherAccountId: 'deposito', fromRule: true, include: true });
+    expect(result?.categoryId).toBeUndefined();
+    const [draft] = previewDrafts(preview([row({ description: 'BONIFICO VERSO DEPOSITO', amountCents: -20000 })], { rules }), accountId);
+    expect(draft).toMatchObject({ type: 'trasferimento', accountId, toAccountId: 'deposito', amountCents: 20000 });
+    expect(draft && validateTransaction(draft)).toBeNull();
+  });
+
+  it('una riga in entrata diventa un trasferimento da quel conto', () => {
+    const [draft] = previewDrafts(preview([row({ description: 'BONIFICO DA DEPOSITO', amountCents: 5000 })], { rules }), accountId);
+    expect(draft).toMatchObject({ type: 'trasferimento', accountId: 'deposito', toAccountId: accountId, amountCents: 5000 });
+    expect(draft && validateTransaction(draft)).toBeNull();
+  });
+
+  it('sul conto indicato dalla regola la riga resta quello che è', () => {
+    const rows = preview([row({ description: 'INTERESSI DEPOSITO', amountCents: 400 })], { rules, accountId: 'deposito' });
+    expect(rows[0]).toMatchObject({ type: 'entrata', fromRule: false });
+    expect(rows[0]?.otherAccountId).toBeUndefined();
+  });
+
+  it('non conta né come entrata né come uscita', () => {
+    const rows = preview([row({ description: 'BONIFICO VERSO DEPOSITO', amountCents: -20000 }), row({ description: 'POS', amountCents: -100, date: '2026-10-06' })], { rules });
+    expect(summarizePreview(rows)).toEqual({ count: 2, incomeCents: 0, expenseCents: 100, transfers: 1 });
+  });
+
+  it('una nuova regola trasforma le righe simili, non quelle cambiate a mano', () => {
+    const rows = preview([row({ description: 'DEPOSITO A' }), row({ description: 'DEPOSITO B', date: '2026-10-04' })]);
+    const first = rows[0];
+    if (!first) throw new Error('Manca la riga');
+    rows[0] = { ...first, categoryId: 'cat-viaggi', edited: true };
+    const updated = applyRules(rows, rules, { accountId, accounts, categories });
+    expect(updated[0]).toMatchObject({ type: 'uscita', categoryId: 'cat-viaggi' });
+    expect(updated[1]).toMatchObject({ type: 'trasferimento', otherAccountId: 'deposito', fromRule: true });
+    expect(updated[1]?.categoryId).toBeUndefined();
+  });
+
+  it('una riga già trasferimento torna normale se la regola nuova dice altro', () => {
+    const [first] = preview([row({ description: 'DEPOSITO ROSSI' })], { rules });
+    if (!first) throw new Error('Manca la riga');
+    const [updated] = applyRules([first], [{ id: 'c', contains: 'deposito rossi', categoryId: 'cat-spesa' }, ...rules], { accountId, accounts, categories });
+    expect(updated).toMatchObject({ type: 'uscita', categoryId: 'cat-spesa', fromRule: true });
+    expect(updated?.otherAccountId).toBeUndefined();
+  });
+
+  it('un trasferimento già registrato dall’altro conto resta un doppione anche con la regola', () => {
+    const incoming = existing({ type: 'trasferimento', accountId: 'deposito', toAccountId: accountId, categoryId: undefined, amountCents: 5000 });
+    const [result] = preview([row({ description: 'BONIFICO DA DEPOSITO', amountCents: 5000 })], { rules, transactions: [incoming] });
+    expect(result).toMatchObject({ status: 'forse-presente', include: false, type: 'trasferimento' });
   });
 });
 

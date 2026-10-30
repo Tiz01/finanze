@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useData } from '../db/DataProvider';
-import { createRule } from '../db/imports';
+import { createRule, type RuleDraft } from '../db/imports';
 import { formatShortDate, todayIso } from '../domain/dates';
 import { applyRules, summarizePreview, type PreviewRow } from '../domain/importPreview';
 import { suggestRuleText } from '../domain/importRules';
@@ -31,7 +31,7 @@ function RowEditor({
 }: {
   row: PreviewRow;
   accountId: string;
-  onSave: (row: PreviewRow, newRule?: { contains: string; categoryId: string }) => Promise<void>;
+  onSave: (row: PreviewRow, newRule?: RuleDraft) => Promise<void>;
   onClose: () => void;
 }) {
   const { accounts, categories } = useData();
@@ -67,8 +67,9 @@ function RowEditor({
       otherAccountId: type === 'trasferimento' ? otherAccountId : undefined,
       edited: true,
     };
+    const target = type === 'trasferimento' ? { transferAccountId: otherAccountId } : { categoryId };
     try {
-      await onSave(edited, makeRule && type !== 'trasferimento' ? { contains, categoryId } : undefined);
+      await onSave(edited, makeRule ? { contains, ...target } : undefined);
       onClose();
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : 'Non è stato possibile salvare');
@@ -104,17 +105,15 @@ function RowEditor({
             <p className="text-sm text-muted">Un trasferimento non è né una spesa né un’entrata.</p>
           </>
         ) : (
-          <>
-            <Field label="Categoria">
-              <SelectInput value={categoryId} onChange={setCategoryId} options={categoryOptions(categories, kind, categoryId)} />
-            </Field>
-            <ToggleRow label="Crea una regola" hint="Vale per questo file e per i prossimi." checked={makeRule} onChange={setMakeRule} />
-            {makeRule && (
-              <Field label="Se la descrizione contiene">
-                <TextInput value={contains} onChange={(event) => setContains(event.target.value)} autoComplete="off" autoCapitalize="characters" />
-              </Field>
-            )}
-          </>
+          <Field label="Categoria">
+            <SelectInput value={categoryId} onChange={setCategoryId} options={categoryOptions(categories, kind, categoryId)} />
+          </Field>
+        )}
+        <ToggleRow label="Crea una regola" hint="Vale per questo file e per i prossimi." checked={makeRule} onChange={setMakeRule} />
+        {makeRule && (
+          <Field label="Se la descrizione contiene">
+            <TextInput value={contains} onChange={(event) => setContains(event.target.value)} autoComplete="off" autoCapitalize="characters" />
+          </Field>
         )}
         {error && (
           <p role="alert" className="text-sm text-danger">
@@ -138,7 +137,7 @@ function Row({ row, onPress }: { row: PreviewRow; onPress: () => void }) {
   let detail: string;
   if (row.status === 'gia-importato') detail = 'Già importato';
   else if (row.status === 'forse-presente' && !row.edited) detail = `Forse è già: ${row.match?.note || 'un movimento'}, ${formatShortDate(row.match?.date ?? row.date, today)}`;
-  else if (row.type === 'trasferimento') detail = `Trasferimento ${row.amountCents < 0 ? 'verso' : 'da'} ${otherName}`;
+  else if (row.type === 'trasferimento') detail = `${row.amountCents < 0 ? 'Verso' : 'Da'} ${otherName}`;
   else detail = `${category?.name ?? 'Senza categoria'}${row.fromRule || row.edited ? '' : ' · nessuna regola'}`;
 
   return (
@@ -202,11 +201,11 @@ export function ImportPreviewStep({
     ...(skipped.length > 0 ? [{ value: 'non-lette' as const, label: `Non lette (${skipped.length})` }] : []),
   ];
 
-  async function saveRow(edited: PreviewRow, newRule?: { contains: string; categoryId: string }) {
+  async function saveRow(edited: PreviewRow, newRule?: RuleDraft) {
     let updated = rows.map((row) => (row.key === edited.key ? edited : row));
     if (newRule) {
       const rule = await createRule(newRule);
-      updated = applyRules(updated, [...importRules, rule], categories);
+      updated = applyRules(updated, [...importRules, rule], { accountId, accounts, categories });
     }
     onChangeRows(updated);
   }

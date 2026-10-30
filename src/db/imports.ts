@@ -57,6 +57,7 @@ export type RuleDraft = Omit<ImportRule, 'id'>;
 function prepareRule(draft: RuleDraft): RuleDraft {
   const contains = draft.contains.trim();
   if (!contains) throw new Error('Scrivi il testo da cercare');
+  if (draft.transferAccountId) return { contains, transferAccountId: draft.transferAccountId };
   if (!draft.categoryId) throw new Error('Scegli la categoria');
   return { contains, categoryId: draft.categoryId };
 }

@@ -205,9 +205,11 @@ function profileProblem(profile: ImportProfile, accountIds: Set<string>): string
   return mappingShapeProblem(profile.mapping);
 }
 
-function importRuleProblem(rule: ImportRule, categoryIds: Set<string>): string | null {
+function importRuleProblem(rule: ImportRule, accountIds: Set<string>, categoryIds: Set<string>): string | null {
   if (!isNonEmptyString(rule.contains)) return 'manca il testo da cercare';
-  return categoryIds.has(rule.categoryId) ? null : 'la categoria non esiste';
+  if (rule.transferAccountId === undefined) return categoryIds.has(rule.categoryId ?? '') ? null : 'la categoria non esiste';
+  if (rule.categoryId !== undefined) return 'non può avere sia una categoria sia un conto';
+  return accountIds.has(rule.transferAccountId) ? null : 'il conto non esiste';
 }
 
 function findProblem(data: BackupData): string | null {
@@ -269,7 +271,7 @@ function findProblem(data: BackupData): string | null {
   }
 
   for (const rule of data.importRules) {
-    const problem = importRuleProblem(rule, categoryIds);
+    const problem = importRuleProblem(rule, accountIds, categoryIds);
     if (problem) return `Regola «${String(rule.contains)}»: ${problem}.`;
   }
 

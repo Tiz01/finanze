@@ -28,7 +28,8 @@ export async function updateAccount(id: string, draft: AccountDraft): Promise<vo
 }
 
 export async function deleteAccount(id: string): Promise<void> {
-  await db.transaction('rw', [db.accounts, db.transactions, db.reconciliations, db.recurring, db.budgets, db.importProfiles], async () => {
+  const tables = [db.accounts, db.transactions, db.reconciliations, db.recurring, db.budgets, db.importProfiles, db.importRules];
+  await db.transaction('rw', tables, async () => {
     const usedByRecurring = await db.recurring
       .filter(({ template }) => template.accountId === id || template.toAccountId === id)
       .count();
@@ -49,5 +50,6 @@ export async function deleteAccount(id: string): Promise<void> {
       .modify((profile) => {
         delete profile.accountId;
       });
+    await db.importRules.filter((rule) => rule.transferAccountId === id).delete();
   });
 }

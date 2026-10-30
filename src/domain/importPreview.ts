@@ -1,5 +1,5 @@
 import { daysBetween } from './dates';
-import { matchRule } from './importRules';
+import { matchRule, type RuleContext } from './importRules';
 import { plainText, type StatementRow } from './statementMapping';
 import type { Category, ImportRule, Transaction, TransactionDraft } from './types';
 
@@ -25,11 +25,9 @@ export interface PreviewRow extends StatementRow {
   edited: boolean;
 }
 
-export interface PreviewContext {
-  accountId: string;
+export interface PreviewContext extends RuleContext {
   transactions: Transaction[];
   rules: ImportRule[];
-  categories: Category[];
 }
 
 /** Quanto il movimento cambia il saldo del conto; null se non lo tocca o se è una rettifica. */
@@ -53,10 +51,18 @@ export function fallbackCategoryId(categories: Category[], kind: 'entrata' | 'us
   return active.find(({ id }) => id === FALLBACK_CATEGORIES[kind])?.id ?? active.at(-1)?.id;
 }
 
-function categorize(row: StatementRow, rules: ImportRule[], categories: Category[]) {
+function categorize(row: StatementRow, rules: ImportRule[], context: RuleContext) {
   const kind = row.amountCents < 0 ? 'uscita' : 'entrata';
-  const rule = matchRule(rules, categories, row.description, kind);
-  return { type: kind, categoryId: rule?.categoryId ?? fallbackCategoryId(categories, kind), fromRule: rule !== null } as const;
+  const rule = matchRule(rules, context, row.description, kind);
+  if (rule?.transferAccountId) {
+    return { type: 'trasferimento', categoryId: undefined, otherAccountId: rule.transferAccountId, fromRule: true } as const;
+  }
+  return {
+    type: kind,
+    categoryId: rule?.categoryId ?? fallbackCategoryId(context.categories, kind),
+    otherAccountId: undefined,
+    fromRule: rule !== null,
+  } as const;
 }
 
 /**
@@ -65,7 +71,7 @@ function categorize(row: StatementRow, rules: ImportRule[], categories: Category
  * ma reimportando lo stesso file risultano entrambi già presenti.
  */
 export function buildPreview(rows: StatementRow[], context: PreviewContext): PreviewRow[] {
-  const { accountId, categories, rules, transactions } = context;
+  const { accountId, rules, transactions } = context;
   const onAccount = transactions.filter((transaction) => signedOn(transaction, accountId) !== null);
   const byImportId = new Map(onAccount.flatMap((transaction) => (transaction.importId ? [[transaction.importId, transaction] as const] : [])));
 
@@ -104,7 +110,7 @@ export function buildPreview(rows: StatementRow[], context: PreviewContext): Pre
 
   const preview = entries.map(({ exact, importId, row }, key): PreviewRow => {
     const possible = similar.get(key);
-    const base = { ...row, key, importId, edited: false, ...categorize(row, rules, categories) };
+    const base = { ...row, key, importId, edited: false, ...categorize(row, rules, context) };
     if (exact) return { ...base, status: 'gia-importato', match: exact, include: false };
     if (possible) return { ...base, status: 'forse-presente', match: possible, include: false };
     return { ...base, status: 'nuovo', include: true };
@@ -113,8 +119,8 @@ export function buildPreview(rows: StatementRow[], context: PreviewContext): Pre
 }
 
 /** Dopo una nuova regola: aggiorna le righe, senza toccare quelle cambiate a mano. */
-export function applyRules(rows: PreviewRow[], rules: ImportRule[], categories: Category[]): PreviewRow[] {
-  return rows.map((row) => (row.edited ? row : { ...row, ...categorize(row, rules, categories) }));
+export function applyRules(rows: PreviewRow[], rules: ImportRule[], context: RuleContext): PreviewRow[] {
+  return rows.map((row) => (row.edited ? row : { ...row, ...categorize(row, rules, context) }));
 }
 
 export function previewDrafts(rows: PreviewRow[], accountId: string): TransactionDraft[] {

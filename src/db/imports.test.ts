@@ -136,6 +136,21 @@ describe('regole', () => {
     await expect(createRule({ contains: 'x', categoryId: '' })).rejects.toThrow(/categoria/);
   });
 
+  it('una regola di trasferimento ha il conto e non la categoria', async () => {
+    const rule = await createRule({ contains: ' DEPOSITO ', transferAccountId: 'conto', categoryId: 'cat-spesa' });
+    expect(await db.importRules.get(rule.id)).toEqual({ id: rule.id, contains: 'DEPOSITO', transferAccountId: 'conto' });
+    await updateRule(rule.id, { contains: 'DEPOSITO', categoryId: 'cat-spesa' });
+    expect(await db.importRules.get(rule.id)).toEqual({ id: rule.id, contains: 'DEPOSITO', categoryId: 'cat-spesa' });
+  });
+
+  it('spariscono con il conto a cui puntano', async () => {
+    const accountId = await createAccount(accountDraft);
+    await createRule({ contains: 'A', transferAccountId: accountId });
+    await createRule({ contains: 'B', categoryId: 'cat-spesa' });
+    await deleteAccount(accountId);
+    expect((await db.importRules.toArray()).map((rule) => rule.contains)).toEqual(['B']);
+  });
+
   it('si modificano e si eliminano', async () => {
     const { id } = await createRule({ contains: 'ROSSI', categoryId: 'cat-spesa' });
     await updateRule(id, { contains: 'BIANCHI', categoryId: 'cat-viaggi' });
@@ -175,6 +190,9 @@ describe('backup', () => {
     };
     expect(errorOf({ importRules: [{ id: 'r', contains: '', categoryId: 'cat-spesa' }] })).toMatch(/testo/);
     expect(errorOf({ importRules: [{ id: 'r', contains: 'x', categoryId: 'boh' }] })).toMatch(/categoria/);
+    expect(errorOf({ importRules: [{ id: 'r', contains: 'x' }] })).toMatch(/categoria/);
+    expect(errorOf({ importRules: [{ id: 'r', contains: 'x', transferAccountId: 'boh' }] })).toMatch(/conto non esiste/);
+    expect(errorOf({ importRules: [{ id: 'r', contains: 'x', categoryId: 'cat-spesa', transferAccountId: 'boh' }] })).toMatch(/sia una categoria sia un conto/);
     expect(errorOf({ importProfiles: [{ id: 'p', name: '', signature: '', mapping }] })).toMatch(/nome/);
     expect(errorOf({ importProfiles: [{ id: 'p', name: 'A', signature: 1, mapping }] })).toMatch(/intestazioni/);
     expect(errorOf({ importProfiles: [{ id: 'p', name: 'A', signature: '', mapping: {} }] })).toMatch(/colonne/);
@@ -196,7 +214,7 @@ describe('dal file ai report', () => {
     const headerRow = findHeaderRow(rows);
     const { rows: read } = extractRows(rows, guessMapping(rows, headerRow));
     const data = await readAllData();
-    return buildPreview(read, { accountId, transactions: data.transactions, rules: data.importRules, categories: data.categories });
+    return buildPreview(read, { accountId, accounts: data.accounts, transactions: data.transactions, rules: data.importRules, categories: data.categories });
   }
 
   it('un trasferimento segnato in anteprima non diventa una spesa, e il file non si importa due volte', async () => {
@@ -228,6 +246,31 @@ describe('dal file ai report', () => {
     expect(second.every((row) => !row.include && row.status === 'gia-importato')).toBe(true);
     expect((await importMovements(previewDrafts(second, accountId))).count).toBe(0);
     expect(await db.transactions.count()).toBe(5);
+  });
+
+  it('con una regola il trasferimento si riconosce da solo, e dall’altro conto risulta già presente', async () => {
+    const accountId = await createAccount(accountDraft);
+    const depositId = await createAccount({ ...accountDraft, name: 'Deposito', initialBalanceCents: 0, type: 'deposito' });
+    await createRule({ contains: 'verso deposito', transferAccountId: depositId });
+
+    const preview = await previewOfStatement(accountId);
+    expect(preview.find((row) => row.description.includes('DEPOSITO'))).toMatchObject({ type: 'trasferimento', otherAccountId: depositId });
+    await importMovements(previewDrafts(preview, accountId));
+
+    const data = await readAllData();
+    const summary = summarizePeriod(data, '2026-10-01', '2026-10-31');
+    expect(summary.expenseCents).toBe(4820);
+    const balances = computeBalances(data.accounts, data.transactions, '2026-10-31');
+    expect(balances.get(depositId)).toBe(20000);
+
+    const [fromDeposit] = buildPreview([{ date: '2026-10-08', description: 'BONIFICO RICEVUTO', amountCents: 20000 }], {
+      accountId: depositId,
+      accounts: data.accounts,
+      transactions: data.transactions,
+      rules: data.importRules,
+      categories: data.categories,
+    });
+    expect(fromDeposit).toMatchObject({ status: 'forse-presente', include: false });
   });
 
   it('la banca salvata viene riconosciuta al file successivo', async () => {

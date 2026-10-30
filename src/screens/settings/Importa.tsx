@@ -93,7 +93,7 @@ export function Importa() {
   function showPreview(next: ImportDraft) {
     const { rows, skipped } = extractRows(next.sheets[next.sheetIndex]?.rows ?? [], next.mapping);
     setPreview({
-      rows: buildPreview(rows, { accountId: next.accountId, transactions, rules: importRules, categories }),
+      rows: buildPreview(rows, { accountId: next.accountId, accounts, transactions, rules: importRules, categories }),
       skipped,
     });
   }

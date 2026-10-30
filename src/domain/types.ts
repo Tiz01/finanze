@@ -148,7 +148,10 @@ export interface ImportProfile {
 export interface ImportRule {
   id: string;
   contains: string;
-  categoryId: string;
+  /** Cosa diventa la riga: un movimento di questa categoria… */
+  categoryId?: string;
+  /** …oppure un trasferimento con questo conto, verso o da a seconda del segno dell'importo. */
+  transferAccountId?: string;
 }
 
 export interface Holding {
