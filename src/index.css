@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f3f5f5;
+  --surface: #ffffff;
+  --ink: #12191c;
+  --muted: #5b676c;
+  --line: #dfe4e6;
+  --accent: #0f766e;
+  --on-accent: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0f12;
+    --surface: #161c20;
+    --ink: #edf1f2;
+    --muted: #97a3a9;
+    --line: #283036;
+    --accent: #2dd4bf;
+    --on-accent: #06211e;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+}
+
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@utility px-page {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+
+/* iOS disegna dietro la barra di stato un velo sfocato del colore di sfondo della radice e ne
+   ricava il colore del testo. Intestazione e barra in basso usano lo stesso colore: così
+   restano uniformi qualunque cosa decida il sistema. */
+html {
+  background-color: var(--surface);
+}
+
+html,
+body {
+  height: 100%;
+  overscroll-behavior: none;
+  color: var(--ink);
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.app-shell {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg);
+}
