@@ -38,7 +38,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     };
   }, [accounts, categories, transactions, settings]);
 
-  if (!value) return <main className="min-h-0 flex-1 bg-bg" />;
+  // Trasparente: iOS campiona qui il colore della barra di stato, che deve restare quello dell'intestazione.
+  if (!value) return <main className="min-h-0 flex-1" />;
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
 }
 

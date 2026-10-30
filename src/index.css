@@ -75,6 +75,17 @@ body {
   touch-action: manipulation;
 }
 
+/* Su iOS i campi data hanno una larghezza minima propria e uscirebbero dal contenitore. */
+input[type='date'] {
+  display: block;
+  appearance: none;
+  line-height: 2.875rem;
+}
+
+input[type='date']::-webkit-date-and-time-value {
+  text-align: left;
+}
+
 .app-shell {
   position: fixed;
   inset: 0;

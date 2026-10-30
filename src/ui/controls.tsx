@@ -40,7 +40,7 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
 }
 
 // Almeno 16px: con meno, iOS ingrandisce la pagina quando il campo prende il focus.
-const INPUT_CLASS = 'min-h-12 w-full min-w-0 rounded-xl border border-line bg-bg px-3 text-base';
+const INPUT_CLASS = 'min-h-12 w-full min-w-0 rounded-xl border border-line bg-bg px-3 text-base text-ink';
 
 export function TextInput({ className = '', ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={`${INPUT_CLASS} ${className}`} />;
@@ -56,13 +56,23 @@ export function SelectInput({
   options: readonly { value: string; label: string }[];
 }) {
   return (
-    <select value={value} onChange={(event) => onChange(event.target.value)} className={INPUT_CLASS}>
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
+    <span className="relative block">
+      {/* appearance-none: con l'aspetto nativo iOS ignora l'altezza minima. */}
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={`${INPUT_CLASS} appearance-none pr-10`}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-muted">
+        <ChevronDown />
+      </span>
+    </span>
   );
 }
 
@@ -129,7 +139,9 @@ export function Segmented<T extends string>({
   );
 }
 
-const CHIP_CLASS = 'relative inline-flex min-h-10 max-w-full min-w-0 shrink-0 items-center gap-1 rounded-full border px-3 text-sm';
+// overflow-hidden: il selettore invisibile sopra l'etichetta non deve coprire le caselle vicine.
+const CHIP_CLASS =
+  'relative inline-flex min-h-10 max-w-full min-w-0 shrink-0 items-center gap-1 overflow-hidden rounded-full border px-3 text-sm';
 
 function ChevronDown() {
   return (
