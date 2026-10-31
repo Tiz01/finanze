@@ -1,6 +1,6 @@
 import { isValidIsoDate } from '../domain/dates';
 import { hasPosition, snapshotId, snapshotsByHolding } from '../domain/investments';
-import type { InstrumentMatch } from '../domain/quotes';
+import type { InstrumentMatch, PricePoint } from '../domain/quotes';
 import type { Holding, HoldingSnapshot, IsoDate } from '../domain/types';
 import { db } from './db';
 import type { Undo } from './transactions';
@@ -75,8 +75,10 @@ export async function updateHolding(
     if (!previous) throw new Error('Lo strumento non esiste più');
     await assertInvestmentAccount(prepared.accountId);
     // Senza una fonte il prezzo torna a mano: quella vecchia non deve restare.
-    const { quoteSource: _previousSource, ...rest } = previous;
-    await db.holdings.put({ ...rest, ...prepared });
+    // Con una fonte nuova lo storico letto finora è di un altro strumento: va riletto.
+    const { historyFrom, quoteSource: previousSource, ...rest } = previous;
+    const keepHistory = historyFrom !== undefined && prepared.quoteSource === previousSource;
+    await db.holdings.put({ ...rest, ...prepared, ...(keepHistory ? { historyFrom } : {}) });
     if (position) await db.holdingSnapshots.put(snapshotOf(id, position));
   });
 }
@@ -155,6 +157,25 @@ export async function recordQuotes(quotes: QuoteUpdate[], today: IsoDate): Promi
     }
     if (changes.length > 0) await db.holdingSnapshots.bulkPut(changes);
     return changes.length;
+  });
+}
+
+/** Scrive le chiusure passate da `from` in poi, senza toccare quote e prezzo di acquisto delle righe che li hanno. */
+export async function recordHistory(holdingId: string, points: PricePoint[], from: IsoDate, today: IsoDate): Promise<void> {
+  await db.transaction('rw', db.holdings, db.holdingSnapshots, async () => {
+    const holding = await db.holdings.get(holdingId);
+    if (!holding) return;
+    const rows = await db.holdingSnapshots.where('holdingId').equals(holdingId).toArray();
+    const byDate = new Map(rows.map((row) => [row.date, row]));
+    const changes = points.flatMap(({ date, priceMicros }): HoldingSnapshot[] => {
+      if (date < from || date > today || !isMicros(priceMicros) || priceMicros === 0) return [];
+      const sameDay = byDate.get(date);
+      if (!sameDay) return [{ id: snapshotId(holdingId, date), holdingId, date, priceMicros }];
+      return sameDay.priceMicros === priceMicros ? [] : [{ ...sameDay, priceMicros }];
+    });
+    if (changes.length > 0) await db.holdingSnapshots.bulkPut(changes);
+    const historyFrom = holding.historyFrom !== undefined && holding.historyFrom < from ? holding.historyFrom : from;
+    if (holding.historyFrom !== historyFrom) await db.holdings.put({ ...holding, historyFrom });
   });
 }
 

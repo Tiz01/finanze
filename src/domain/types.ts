@@ -164,6 +164,8 @@ export interface Holding {
   createdAt: string;
   /** Dove leggere il prezzo in automatico. Se manca, il prezzo lo scrive la persona. */
   quoteSource?: string;
+  /** Da che giorno sono già state lette le chiusure passate. */
+  historyFrom?: IsoDate;
 }
 
 /**

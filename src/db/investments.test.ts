@@ -8,7 +8,17 @@ import { summarizePeriod } from '../domain/reports';
 import { createAccount, deleteAccount, updateAccount, type AccountDraft } from './accounts';
 import { clearAllData, loadDemoData, readAllData, replaceAllData } from './data';
 import { db } from './db';
-import { createHolding, deleteHolding, deleteSnapshot, linkHolding, recordPrices, recordQuotes, updateHolding, type PositionDraft } from './investments';
+import {
+  createHolding,
+  deleteHolding,
+  deleteSnapshot,
+  linkHolding,
+  recordHistory,
+  recordPrices,
+  recordQuotes,
+  updateHolding,
+  type PositionDraft,
+} from './investments';
 import { addTransaction } from './transactions';
 
 const today = '2026-10-30';
@@ -236,6 +246,89 @@ describe('prezzi automatici', () => {
     expect((await db.holdings.get(id))?.quoteSource).toBe('FUND/1');
     await updateHolding(id, { accountId: brokerId, instrument: 'ETF-A', isin: '' }, null, today);
     expect(await db.holdings.get(id)).not.toHaveProperty('quoteSource');
+  });
+});
+
+describe('chiusure passate', () => {
+  const linked = () => createHolding({ accountId: brokerId, instrument: 'ETF-A', isin: '', quoteSource: 'FUND/1' }, position(), today);
+  const closes = [
+    { date: '2026-09-30', priceMicros: 100_000_000 },
+    { date: '2026-10-01', priceMicros: 101_000_000 },
+    { date: '2026-10-02', priceMicros: 102_000_000 },
+    { date: '2026-10-31', priceMicros: 103_000_000 },
+  ];
+
+  it('scrive solo i giorni richiesti, senza toccare quote e prezzo di acquisto', async () => {
+    const id = await linked();
+    await recordHistory(id, closes, '2026-10-01', today);
+    const rows = await db.holdingSnapshots.where('holdingId').equals(id).sortBy('date');
+    expect(rows.map(({ date }) => date)).toEqual(['2026-10-01', '2026-10-02']);
+    expect(rows[0]).toMatchObject({ quantityMicros: 30_000_000, avgPriceMicros: 151_500_000, priceMicros: 101_000_000 });
+    expect(rows[1]).toEqual({ id: `${id}|2026-10-02`, holdingId: id, date: '2026-10-02', priceMicros: 102_000_000 });
+    expect((await db.holdings.get(id))?.historyFrom).toBe('2026-10-01');
+  });
+
+  it('riempie il grafico con il valore di ogni giorno', async () => {
+    const id = await linked();
+    await recordHistory(id, closes, '2026-10-01', today);
+    const data = await readAllData();
+    const points = investmentSeries(data.holdings, data.holdingSnapshots, today);
+    expect(points[0]).toEqual({ date: '2026-10-01', cents: 303_000, baselineCents: 454_500 });
+    expect(points[1]).toEqual({ date: '2026-10-02', cents: 306_000, baselineCents: 454_500 });
+    expect(points.at(-1)).toEqual({ date: today, cents: 306_000, baselineCents: 454_500 });
+    expect(id).toBeTruthy();
+  });
+
+  it('dei giorni in cui l’app è rimasta chiusa non sposta la data già letta', async () => {
+    const id = await linked();
+    await recordHistory(id, closes, '2026-10-01', today);
+    await recordHistory(id, [{ date: '2026-10-20', priceMicros: 110_000_000 }], '2026-10-20', today);
+    expect((await db.holdings.get(id))?.historyFrom).toBe('2026-10-01');
+    expect((await db.holdingSnapshots.get(`${id}|2026-10-20`))?.priceMicros).toBe(110_000_000);
+  });
+
+  it('segna come letto anche senza chiusure, per non riprovare all’infinito', async () => {
+    const id = await linked();
+    await recordHistory(id, [], '2026-10-01', today);
+    expect((await db.holdings.get(id))?.historyFrom).toBe('2026-10-01');
+  });
+
+  it('ignora prezzi sbagliati e strumenti eliminati', async () => {
+    const id = await linked();
+    await recordHistory(id, [{ date: '2026-10-02', priceMicros: 0 }, { date: '2026-10-03', priceMicros: 1.5 }], '2026-10-01', today);
+    expect(await db.holdingSnapshots.count()).toBe(1);
+    await expect(recordHistory('boh', closes, '2026-10-01', today)).resolves.toBeUndefined();
+    expect(await db.holdingSnapshots.count()).toBe(1);
+  });
+
+  it('cambiando strumento lo storico va riletto, cambiando il nome no', async () => {
+    const id = await linked();
+    await recordHistory(id, closes, '2026-10-01', today);
+    await updateHolding(id, { accountId: brokerId, instrument: 'Altro nome', isin: '', quoteSource: 'FUND/1' }, null, today);
+    expect((await db.holdings.get(id))?.historyFrom).toBe('2026-10-01');
+    await updateHolding(id, { accountId: brokerId, instrument: 'Altro nome', isin: '', quoteSource: 'FUND/2' }, null, today);
+    expect(await db.holdings.get(id)).not.toHaveProperty('historyFrom');
+  });
+
+  it('tornando a mano smette di contare come letto', async () => {
+    const id = await linked();
+    await recordHistory(id, closes, '2026-10-01', today);
+    await updateHolding(id, { accountId: brokerId, instrument: 'ETF-A', isin: '' }, null, today);
+    const holding = await db.holdings.get(id);
+    expect(holding).not.toHaveProperty('historyFrom');
+    expect(holding).not.toHaveProperty('quoteSource');
+  });
+
+  it('nel backup torna uguale, e una data sbagliata si rifiuta', async () => {
+    const id = await linked();
+    await recordHistory(id, closes, '2026-10-01', today);
+    const data = await readAllData();
+    const result = parseBackup(serializeBackup(buildBackup(data)));
+    expect(result.ok && result.backup.data.holdings).toEqual(data.holdings);
+    expect(result.ok && result.backup.data.holdingSnapshots).toEqual(data.holdingSnapshots);
+
+    const broken = parseBackup(serializeBackup(buildBackup({ ...data, holdings: [{ ...data.holdings[0]!, historyFrom: 'ieri' }] })));
+    expect(broken.ok ? '' : broken.error).toMatch(/storico/);
   });
 });
 

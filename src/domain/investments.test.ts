@@ -3,7 +3,9 @@ import {
   activeHoldings,
   formatMicros,
   hasPosition,
+  historyNeeded,
   investmentSeries,
+  isHistoryMissing,
   parseMicros,
   portfolioTotals,
   positionAt,
@@ -325,5 +327,52 @@ describe('righe del solo prezzo', () => {
     expect(hasPosition(price('a', '2026-10-01', 1))).toBe(false);
     expect(positionAt([snapshot('a', '2026-10-01', 1, 1, 1), price('a', '2026-10-02', 2)], '2026-10-30')?.date).toBe('2026-10-01');
     expect(positionAt([snapshot('a', '2026-10-01', 1, 1, 1)], '2026-09-30')).toBeUndefined();
+  });
+});
+
+describe('storico dei prezzi', () => {
+  const linked = (fields: Partial<Holding> = {}): Holding => ({ ...holding('a'), quoteSource: 'FUND/1', ...fields });
+  const rows = [snapshot('a', '2026-10-01', 1, 1, 1), snapshot('a', '2026-10-29', 1, 1, 1)];
+
+  it('manca se non è mai stato letto', () => {
+    expect(isHistoryMissing(linked(), rows, today)).toBe(true);
+    expect(historyNeeded(linked(), rows, today, today)).toEqual({ from: '2026-10-01', whole: true });
+  });
+
+  it('manca se il primo acquisto è prima di quello che è stato letto', () => {
+    expect(isHistoryMissing(linked({ historyFrom: '2026-10-15' }), rows, today)).toBe(true);
+    expect(isHistoryMissing(linked({ historyFrom: '2026-10-01' }), rows, today)).toBe(false);
+    expect(isHistoryMissing(linked({ historyFrom: '2026-09-01' }), rows, today)).toBe(false);
+  });
+
+  it('non serve a mano, senza quote o per chi ha comprato oggi', () => {
+    expect(isHistoryMissing(holding('a'), rows, today)).toBe(false);
+    expect(historyNeeded(holding('a'), rows, today, today)).toBeNull();
+    expect(isHistoryMissing(linked(), [], today)).toBe(false);
+    expect(historyNeeded(linked(), [], today, today)).toBeNull();
+    expect(isHistoryMissing(linked(), [snapshot('a', today, 1, 1, 1)], today)).toBe(false);
+  });
+
+  it('un giorno di distanza è normale, di più sono giorni da riempire', () => {
+    const read = linked({ historyFrom: '2026-10-01' });
+    expect(historyNeeded(read, rows, '2026-10-29', today)).toBeNull();
+    expect(historyNeeded(read, rows, '2026-10-30', today)).toBeNull();
+    expect(historyNeeded(read, rows, '2026-11-02', '2026-11-02')).toEqual({ from: '2026-10-29', whole: false });
+  });
+
+  it('il grafico regge anni di chiusure con più cambi di quote', () => {
+    const price = (date: string, value: number): HoldingSnapshot => ({ id: `a|${date}`, holdingId: 'a', date, priceMicros: value * 1_000_000 });
+    const list: HoldingSnapshot[] = [snapshot('a', '2021-01-01', 1, 10, 10)];
+    for (let year = 2021; year <= 2026; year += 1) {
+      for (let month = 1; month <= 12; month += 1) {
+        const date = `${year}-${String(month).padStart(2, '0')}-15`;
+        if (date < today) list.push(price(date, month));
+      }
+    }
+    list.push(snapshot('a', '2026-01-20', 2, 10, 20));
+    const points = investmentSeries([holding('a')], [...list].reverse(), today);
+    expect(points.length).toBeLessThanOrEqual(400);
+    expect(points[0]).toEqual({ date: '2021-01-01', cents: 1_000, baselineCents: 1_000 });
+    expect(points.at(-1)).toMatchObject({ date: today, cents: 2_000, baselineCents: 2_000 });
   });
 });

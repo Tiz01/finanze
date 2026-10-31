@@ -221,6 +221,7 @@ function holdingProblem(holding: Holding, accountIds: Set<string>): string | nul
   if (typeof holding.isin !== 'string') return 'l’ISIN non è valido';
   if (!accountIds.has(holding.accountId)) return 'il conto non esiste';
   if (holding.quoteSource !== undefined && !isQuoteSource(holding.quoteSource)) return 'la fonte dei prezzi non è valida';
+  if (holding.historyFrom !== undefined && !isValidIsoDate(holding.historyFrom)) return 'la data dello storico non è valida';
   return isNonEmptyString(holding.createdAt) ? null : 'manca la data di inserimento';
 }
 

@@ -18,6 +18,13 @@ export interface Quote {
   priceMicros: number;
   date: IsoDate;
   market: string;
+  /** Il numero di quello strumento su quella borsa: serve per chiederne lo storico. */
+  notation: number | null;
+}
+
+export interface PricePoint {
+  date: IsoDate;
+  priceMicros: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -64,7 +71,7 @@ export function pickQuote(response: unknown): Quote | null {
     const { datetimeLast, last, market } = item;
     const at = typeof datetimeLast === 'string' ? Date.parse(datetimeLast) : Number.NaN;
     if (typeof last !== 'number' || !Number.isFinite(last) || last <= 0 || Number.isNaN(at)) return [];
-    return [{ code: market.codeMarket, name: String(market.name), last, at }];
+    return [{ code: market.codeMarket, name: String(market.name), notation: market.idNotation, last, at }];
   });
   const newest = Math.max(...candidates.map(({ at }) => at));
   const recentOn = (code: string) => candidates.find((quote) => quote.code === code && newest - quote.at <= MAX_BEHIND_MS);
@@ -72,5 +79,21 @@ export function pickQuote(response: unknown): Quote | null {
   if (!chosen) return null;
   const priceMicros = Math.round(chosen.last * MICROS);
   if (!Number.isSafeInteger(priceMicros)) return null;
-  return { priceMicros, date: toIsoDate(new Date(chosen.at)), market: chosen.name };
+  const notation = typeof chosen.notation === 'number' ? chosen.notation : null;
+  return { priceMicros, date: toIsoDate(new Date(chosen.at)), market: chosen.name, notation };
+}
+
+/** Le chiusure giorno per giorno. Il server le segna alle 12 UTC: il giorno giusto è quello in UTC, ovunque ci si trovi. */
+export function parseHistory(response: unknown): PricePoint[] {
+  if (!isRecord(response) || response.isoCurrency !== 'EUR') return [];
+  const { datetimeLast, last } = response;
+  if (!Array.isArray(datetimeLast) || !Array.isArray(last)) return [];
+  return datetimeLast.flatMap((seconds: unknown, index) => {
+    const close: unknown = last[index];
+    if (typeof seconds !== 'number' || typeof close !== 'number' || !Number.isFinite(close) || close <= 0) return [];
+    const moment = new Date(seconds * 1000);
+    const priceMicros = Math.round(close * MICROS);
+    if (Number.isNaN(moment.getTime()) || !Number.isSafeInteger(priceMicros)) return [];
+    return [{ date: moment.toISOString().slice(0, 10), priceMicros }];
+  });
 }

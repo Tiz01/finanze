@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { findMatch, isIsin, isQuoteSource, isSearchable, normalizeCode, pickQuote } from './quotes';
+import { findMatch, isIsin, isQuoteSource, isSearchable, normalizeCode, parseHistory, pickQuote } from './quotes';
 
 function item(fields: object) {
   return { type: 'Instrument', entityType: 'FUND', entityValue: '123', name: 'ETF Prova', isin: 'XX0000000001', symbol: 'ETFA', ...fields };
 }
 
 function quote(codeMarket: string, last: unknown, datetimeLast: string, isoCurrency = 'EUR') {
-  return { market: { codeMarket, name: `Borsa ${codeMarket}` }, last, datetimeLast, isoCurrency };
+  return { market: { codeMarket, name: `Borsa ${codeMarket}`, idNotation: 7 }, last, datetimeLast, isoCurrency };
 }
 
 describe('codici', () => {
@@ -73,7 +73,7 @@ describe('pickQuote', () => {
 
   it('preferisce Milano', () => {
     const response = { list: [quote('_GER', 169, now), quote('_MIL', 168.93, new Date(2026, 9, 30, 14).toISOString()), quote('_TRO', 170, now)] };
-    expect(pickQuote(response)).toEqual({ priceMicros: 168_930_000, date: '2026-10-30', market: 'Borsa _MIL' });
+    expect(pickQuote(response)).toEqual({ priceMicros: 168_930_000, date: '2026-10-30', market: 'Borsa _MIL', notation: 7 });
   });
 
   it('senza Milano prende Xetra, poi il più recente', () => {
@@ -107,5 +107,38 @@ describe('pickQuote', () => {
     expect(pickQuote({ list: [] })).toBeNull();
     expect(pickQuote({ list: [quote('_MIL', 0, now), quote('_MIL', -1, now), quote('_MIL', '10', now), quote('_MIL', 10, 'ieri'), 3, { isoCurrency: 'EUR' }] })).toBeNull();
     expect(pickQuote({ list: [quote('_MIL', 1e300, now)] })).toBeNull();
+  });
+});
+
+describe('parseHistory', () => {
+  const noon = (date: string) => Date.parse(`${date}T12:00:00.000Z`) / 1000;
+
+  it('legge giorno e prezzo di chiusura', () => {
+    const response = { isoCurrency: 'EUR', datetimeLast: [noon('2026-10-29'), noon('2026-10-30')], last: [168.5, 10.304] };
+    expect(parseHistory(response)).toEqual([
+      { date: '2026-10-29', priceMicros: 168_500_000 },
+      { date: '2026-10-30', priceMicros: 10_304_000 },
+    ]);
+  });
+
+  it('il giorno è quello del server, in qualsiasi fuso orario ci si trovi', () => {
+    const [point] = parseHistory({ isoCurrency: 'EUR', datetimeLast: [noon('2026-01-01')], last: [1] });
+    expect(point?.date).toBe('2026-01-01');
+  });
+
+  it('salta le righe rovinate e tiene le altre', () => {
+    const response = {
+      isoCurrency: 'EUR',
+      datetimeLast: [noon('2026-10-26'), 'ieri', noon('2026-10-27'), noon('2026-10-28'), 1e20, noon('2026-10-30')],
+      last: [10, 11, 0, 'dodici', 13, 14],
+    };
+    expect(parseHistory(response).map(({ date }) => date)).toEqual(['2026-10-26', '2026-10-30']);
+  });
+
+  it('niente di utile in altre valute o in risposte rovinate', () => {
+    expect(parseHistory({ isoCurrency: 'USD', datetimeLast: [noon('2026-10-30')], last: [10] })).toEqual([]);
+    expect(parseHistory({ isoCurrency: 'EUR', datetimeLast: 'no', last: [10] })).toEqual([]);
+    expect(parseHistory({ isoCurrency: 'EUR' })).toEqual([]);
+    expect(parseHistory(null)).toEqual([]);
   });
 });

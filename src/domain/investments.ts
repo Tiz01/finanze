@@ -81,7 +81,9 @@ export function snapshotId(holdingId: string, date: IsoDate): string {
 export function snapshotsByHolding(snapshots: HoldingSnapshot[]): Map<string, HoldingSnapshot[]> {
   const grouped = new Map<string, HoldingSnapshot[]>();
   for (const snapshot of snapshots) {
-    grouped.set(snapshot.holdingId, [...(grouped.get(snapshot.holdingId) ?? []), snapshot]);
+    const list = grouped.get(snapshot.holdingId);
+    if (list) list.push(snapshot);
+    else grouped.set(snapshot.holdingId, [snapshot]);
   }
   for (const list of grouped.values()) list.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   return grouped;
@@ -194,20 +196,59 @@ export function investmentSeries(holdings: Holding[], snapshots: HoldingSnapshot
   if (firstDates.length === 0) return [];
   const start = firstDates.reduce((first, date) => (date < first ? date : first));
 
+  // Una riga per giorno di borsa, anche per anni: un cursore per strumento evita di ripartire ogni giorno da capo.
+  const cursors = lists.map((list) => ({
+    list,
+    next: 0,
+    priceMicros: null as number | null,
+    position: null as ReturnType<typeof positionAt> | null,
+  }));
+
   const points: InvestmentPoint[] = [];
   for (let date = start; date <= today; date = addDays(date, 1)) {
     let cents = 0;
     let baselineCents = 0;
-    for (const list of lists) {
-      const latest = snapshotAt(list, date);
-      const position = positionAt(list, date);
-      if (!latest || !position) continue;
-      cents += positionValueCents(position.quantityMicros, latest.priceMicros);
-      baselineCents += positionValueCents(position.quantityMicros, position.avgPriceMicros);
+    for (const cursor of cursors) {
+      for (let row = cursor.list[cursor.next]; row && row.date <= date; row = cursor.list[cursor.next]) {
+        cursor.priceMicros = row.priceMicros;
+        if (hasPosition(row)) cursor.position = row;
+        cursor.next += 1;
+      }
+      if (!cursor.position || cursor.priceMicros === null) continue;
+      cents += positionValueCents(cursor.position.quantityMicros, cursor.priceMicros);
+      baselineCents += positionValueCents(cursor.position.quantityMicros, cursor.position.avgPriceMicros);
     }
     points.push({ date, cents, baselineCents });
   }
   return thinOut(points, MAX_SERIES_POINTS);
+}
+
+/** Il prezzo automatico c'è, ma mancano le chiusure dal primo acquisto in poi. */
+export function isHistoryMissing(holding: Holding, sorted: HoldingSnapshot[], today: IsoDate): boolean {
+  const first = sorted.find(hasPosition)?.date;
+  if (!holding.quoteSource || !first || first >= today) return false;
+  return holding.historyFrom === undefined || first < holding.historyFrom;
+}
+
+export interface HistoryRequest {
+  /** Da questo giorno in poi servono le chiusure. */
+  from: IsoDate;
+  /** Tutta la storia dello strumento, oppure solo i giorni da `from` in poi. */
+  whole: boolean;
+}
+
+/** Quali chiusure passate servono: la storia dal primo acquisto, o i giorni in cui l'app è rimasta chiusa. */
+export function historyNeeded(
+  holding: Holding,
+  sorted: HoldingSnapshot[],
+  lastPriceDate: IsoDate,
+  today: IsoDate,
+): HistoryRequest | null {
+  const first = sorted.find(hasPosition)?.date;
+  const latest = sorted.at(-1)?.date;
+  if (!holding.quoteSource || !first || !latest) return null;
+  if (isHistoryMissing(holding, sorted, today)) return { from: first, whole: true };
+  return daysBetween(latest, lastPriceDate) > 1 ? { from: latest, whole: false } : null;
 }
 
 export function priceAgeLabel(priceDate: IsoDate, today: IsoDate): string {

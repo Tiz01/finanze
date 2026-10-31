@@ -6,18 +6,18 @@ import { useToday } from './useToday';
 
 /** Tiene aggiornati i prezzi automatici quando l'app si apre o torna in primo piano. */
 export function PriceSync() {
-  const { accounts, holdings } = useData();
+  const { accounts, holdings, holdingSnapshots } = useData();
   const today = useToday();
   const active = useMemo(() => activeHoldings(holdings, accounts), [accounts, holdings]);
 
   useEffect(() => {
     const run = () => {
-      if (document.visibilityState === 'visible') void syncPrices(active, today);
+      if (document.visibilityState === 'visible') void syncPrices(active, holdingSnapshots, today);
     };
     run();
     document.addEventListener('visibilitychange', run);
     return () => document.removeEventListener('visibilitychange', run);
-  }, [active, today]);
+  }, [active, holdingSnapshots, today]);
 
   return null;
 }

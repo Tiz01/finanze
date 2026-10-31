@@ -12,6 +12,7 @@ import {
   portfolioTotals,
   positionValueCents,
   priceAgeLabel,
+  snapshotAt,
   snapshotsByHolding,
   summarizeHoldings,
   type HoldingSummary,
@@ -33,6 +34,9 @@ import { ValueChart } from '../ui/ValueChart';
 const ALL_INSTRUMENTS = '';
 // Oltre questi giorni non è un fine settimana o una festa: il prezzo si è proprio fermato.
 const STALE_PRICE_DAYS = 7;
+// Un grafico più corto di così si può ancora riempire indicando la data di acquisto.
+const SHORT_HISTORY_DAYS = 7;
+const MAX_HISTORY_ROWS = 60;
 
 function gainText(gainCents: number, gainRate: number | null): string {
   return `${formatSignedCents(gainCents)}${gainRate === null ? '' : ` (${formatSignedRate(gainRate)})`}`;
@@ -155,7 +159,10 @@ function HoldingForm({
   const avg = parseMicros(avgText);
   const price = automatic ? automatic.priceMicros : parseMicros(priceText);
 
-  const rows = holding ? (snapshotsByHolding(holdingSnapshots).get(holding.id) ?? []) : [];
+  const rows = useMemo(
+    () => (holding ? (snapshotsByHolding(holdingSnapshots).get(holding.id) ?? []) : []),
+    [holding, holdingSnapshots],
+  );
   const positionCount = rows.filter(hasPosition).length;
   // Nei prezzi automatici ogni giorno ha la sua riga: qui contano solo quote e prezzo di acquisto.
   const history = [...rows].reverse().filter((row) => !automatic || hasPosition(row));
@@ -174,12 +181,15 @@ function HoldingForm({
       isin: isin.trim() || automatic?.isin || '',
       ...(automatic ? { quoteSource: automatic.source } : {}),
     };
-    const position = { date: automatic ? today : date, quantityMicros: quantity, avgPriceMicros: avg, priceMicros: price };
+    // In una data passata vale il prezzo di allora, se è già noto: poi arrivano le chiusure vere.
+    const priceThen = snapshotAt(rows, date)?.priceMicros ?? (avg > 0 ? avg : price);
+    const priceMicros = automatic && date !== today ? priceThen : price;
+    const position = { date, quantityMicros: quantity, avgPriceMicros: avg, priceMicros };
     try {
       if (holding) {
         // Con gli stessi numeri e la data proposta sono cambiati solo nome, ISIN o conto.
         const samePosition = summary?.quantityMicros === quantity && summary.avgPriceMicros === avg;
-        const unchanged = position.date === today && samePosition && (automatic !== null || summary?.priceMicros === price);
+        const unchanged = date === today && samePosition && (automatic !== null || summary?.priceMicros === price);
         await updateHolding(holding.id, draft, unchanged ? null : position, today);
       } else {
         await createHolding(draft, position, today);
@@ -233,25 +243,25 @@ function HoldingForm({
             <NumberInput value={avgText} onChange={setAvgText} />
           </Field>
           {showManual && (
-            <>
-              <Field label="Prezzo attuale (€)">
-                <NumberInput value={priceText} onChange={setPriceText} />
-              </Field>
-              <Field label="Data">
-                <TextInput
-                  type="date"
-                  value={date}
-                  max={today}
-                  onChange={(event) => {
-                    if (event.target.value) setDate(event.target.value);
-                  }}
-                />
-              </Field>
-            </>
+            <Field label="Prezzo attuale (€)">
+              <NumberInput value={priceText} onChange={setPriceText} />
+            </Field>
           )}
+          <Field label={showManual ? 'Data' : 'Data di acquisto'}>
+            <TextInput
+              type="date"
+              value={date}
+              max={today}
+              onChange={(event) => {
+                if (event.target.value) setDate(event.target.value);
+              }}
+            />
+          </Field>
         </div>
         <p className="text-sm text-muted">
-          Se hai comprato più volte, usa il prezzo medio di carico che vedi nel portafoglio del broker. Per un’obbligazione, le quote sono il nominale diviso 100.
+          {!showManual && 'Da quella data il grafico conta queste quote con i prezzi di allora. '}
+          Se hai comprato a più riprese, puoi salvare più date, ogni volta con le quote totali e il prezzo medio di carico di quel momento.
+          Per un’obbligazione, le quote sono il nominale diviso 100.
         </p>
         {quantity !== null && avg !== null && price !== null && (
           <p className="rounded-xl bg-bg px-3 py-2 text-sm">
@@ -275,7 +285,7 @@ function HoldingForm({
           <div>
             <span className="mb-1 block text-sm font-medium text-muted">Aggiornamenti</span>
             <div className="divide-y divide-line overflow-hidden rounded-2xl bg-bg text-sm">
-              {history.map((row) => (
+              {history.slice(0, MAX_HISTORY_ROWS).map((row) => (
                 <div key={row.id} className="flex min-h-12 items-center gap-3 px-3 py-1.5">
                   <span className="min-w-0 flex-1">
                     <span className="block">{formatFullDate(row.date)}</span>
@@ -292,6 +302,9 @@ function HoldingForm({
                   )}
                 </div>
               ))}
+              {history.length > MAX_HISTORY_ROWS && (
+                <p className="px-3 py-2 text-xs text-muted">E altri {history.length - MAX_HISTORY_ROWS} più vecchi.</p>
+              )}
             </div>
           </div>
         )}
@@ -435,6 +448,7 @@ export function Investimenti() {
   // A mano si aggiornano quelli senza prezzo automatico, e tutti se la lettura automatica non funziona.
   const manual = syncState === 'failed' ? summaries : summaries.filter(({ holding }) => !holding.quoteSource);
   const hasAutomatic = summaries.some(({ holding }) => holding.quoteSource);
+  const firstChartDate = series[0]?.date ?? today;
 
   const hero =
     summaries.length > 0 ? (
@@ -521,14 +535,12 @@ export function Investimenti() {
                 />
               </div>
             )}
-            {series.length >= 2 ? (
-              <ValueChart points={series} today={today} baselineLabel="Costo di acquisto" />
-            ) : (
-              <p className="text-sm text-muted">
-                {hasAutomatic
-                  ? 'La linea compare nei prossimi giorni: ogni volta che apri l’app si aggiunge il prezzo del giorno.'
-                  : 'La linea compare da domani: ogni aggiornamento dei prezzi aggiunge un pezzo di storia.'}
-              </p>
+            {series.length >= 2 && <ValueChart points={series} today={today} baselineLabel="Costo di acquisto" />}
+            {series.length < 2 && !hasAutomatic && (
+              <p className="text-sm text-muted">La linea compare da domani: ogni aggiornamento dei prezzi aggiunge un pezzo di storia.</p>
+            )}
+            {hasAutomatic && daysBetween(firstChartDate, today) < SHORT_HISTORY_DAYS && (
+              <p className="text-sm text-muted">Per riempire il grafico, tocca uno strumento e indica la data di acquisto.</p>
             )}
           </div>
         </>
