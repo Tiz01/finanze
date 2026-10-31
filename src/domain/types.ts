@@ -162,6 +162,8 @@ export interface Holding {
   /** Facoltativo: vuoto se non indicato. */
   isin: string;
   createdAt: string;
+  /** Dove leggere il prezzo in automatico. Se manca, il prezzo lo scrive la persona. */
+  quoteSource?: string;
 }
 
 /**
@@ -173,9 +175,10 @@ export interface HoldingSnapshot {
   id: string;
   holdingId: string;
   date: IsoDate;
-  quantityMicros: number;
+  /** Assenti se cambia solo il prezzo: valgono quelli dell'ultimo aggiornamento che li ha. */
+  quantityMicros?: number;
   /** Prezzo medio di carico, per quota. */
-  avgPriceMicros: number;
+  avgPriceMicros?: number;
   /** Prezzo di mercato a quella data, per quota. */
   priceMicros: number;
 }

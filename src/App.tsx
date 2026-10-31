@@ -12,6 +12,7 @@ import { Regole } from './screens/settings/Regole';
 import { Ricorrenze } from './screens/settings/Ricorrenze';
 import { EntrySheet } from './ui/EntrySheet';
 import { ErrorBoundary } from './ui/ErrorBoundary';
+import { PriceSync } from './ui/PriceSync';
 import { ReconcileSheet } from './ui/ReconcileSheet';
 import { TabBar } from './ui/TabBar';
 import { ToastHost } from './ui/ToastHost';
@@ -25,7 +26,7 @@ const Importa = lazy(() => import('./screens/settings/Importa').then((module) =>
 
 const SCREENS: Record<Route, ComponentType> = {
   home: Home,
-  'home/investimenti': Investimenti,
+  investimenti: Investimenti,
   movimenti: Movimenti,
   report: Report,
   impostazioni: Impostazioni,
@@ -52,6 +53,7 @@ export function App() {
           </Suspense>
           <EntrySheet />
           <ReconcileSheet />
+          <PriceSync />
         </DataProvider>
       </ErrorBoundary>
       <UpdateBanner />

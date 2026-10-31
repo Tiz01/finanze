@@ -1,5 +1,6 @@
 import { isValidIsoDate } from '../domain/dates';
-import { snapshotAt, snapshotId, snapshotsByHolding } from '../domain/investments';
+import { hasPosition, snapshotId, snapshotsByHolding } from '../domain/investments';
+import type { InstrumentMatch } from '../domain/quotes';
 import type { Holding, HoldingSnapshot, IsoDate } from '../domain/types';
 import { db } from './db';
 import type { Undo } from './transactions';
@@ -8,15 +9,22 @@ export interface HoldingDraft {
   accountId: string;
   instrument: string;
   isin: string;
+  quoteSource?: string;
 }
 
-export type PositionDraft = Pick<HoldingSnapshot, 'date' | 'quantityMicros' | 'avgPriceMicros' | 'priceMicros'>;
+export interface PositionDraft {
+  date: IsoDate;
+  quantityMicros: number;
+  avgPriceMicros: number;
+  priceMicros: number;
+}
 
 function prepareHolding(draft: HoldingDraft): HoldingDraft {
   const instrument = draft.instrument.trim();
   if (!instrument) throw new Error('Scrivi il nome dello strumento');
   if (!draft.accountId) throw new Error('Scegli il conto');
-  return { accountId: draft.accountId, instrument, isin: draft.isin.trim().toUpperCase() };
+  const { accountId, quoteSource } = draft;
+  return { accountId, instrument, isin: draft.isin.trim().toUpperCase(), ...(quoteSource ? { quoteSource } : {}) };
 }
 
 function isMicros(value: number): boolean {
@@ -27,7 +35,7 @@ function checkPosition(position: PositionDraft, today: IsoDate): void {
   if (!isValidIsoDate(position.date)) throw new Error('Data non valida');
   if (position.date > today) throw new Error('La data non può essere futura');
   if (!isMicros(position.quantityMicros)) throw new Error('Quote non valide');
-  if (!isMicros(position.avgPriceMicros)) throw new Error('Prezzo medio non valido');
+  if (!isMicros(position.avgPriceMicros)) throw new Error('Prezzo di acquisto non valido');
   if (!isMicros(position.priceMicros) || position.priceMicros === 0) throw new Error('Prezzo attuale non valido');
 }
 
@@ -66,7 +74,9 @@ export async function updateHolding(
     const previous = await db.holdings.get(id);
     if (!previous) throw new Error('Lo strumento non esiste più');
     await assertInvestmentAccount(prepared.accountId);
-    await db.holdings.put({ ...previous, ...prepared });
+    // Senza una fonte il prezzo torna a mano: quella vecchia non deve restare.
+    const { quoteSource: _previousSource, ...rest } = previous;
+    await db.holdings.put({ ...rest, ...prepared });
     if (position) await db.holdingSnapshots.put(snapshotOf(id, position));
   });
 }
@@ -91,10 +101,7 @@ export interface PriceUpdate {
   priceMicros: number;
 }
 
-/**
- * Un solo aggiornamento al giorno per strumento: rifarlo lo corregge.
- * Quote e prezzo medio restano quelli di quella data, così si può inserire anche un prezzo passato.
- */
+/** Un solo aggiornamento al giorno per strumento: rifarlo lo corregge, senza toccare quote e prezzo medio. */
 export async function recordPrices(date: IsoDate, updates: PriceUpdate[], today: IsoDate): Promise<Undo> {
   if (!isValidIsoDate(date)) throw new Error('Data non valida');
   if (date > today) throw new Error('La data non può essere futura');
@@ -108,10 +115,9 @@ export async function recordPrices(date: IsoDate, updates: PriceUpdate[], today:
     await db.holdingSnapshots.bulkPut(
       updates.map(({ holdingId, priceMicros }) => {
         const list = grouped.get(holdingId) ?? [];
-        const base = snapshotAt(list, date) ?? list[0];
-        if (!base) throw new Error('Lo strumento non esiste più');
-        const { avgPriceMicros, quantityMicros } = base;
-        return snapshotOf(holdingId, { date, quantityMicros, avgPriceMicros, priceMicros });
+        if (list.length === 0) throw new Error('Lo strumento non esiste più');
+        const sameDay = list.find((snapshot) => snapshot.date === date);
+        return sameDay ? { ...sameDay, priceMicros } : { id: snapshotId(holdingId, date), holdingId, date, priceMicros };
       }),
     );
     return () =>
@@ -122,13 +128,53 @@ export async function recordPrices(date: IsoDate, updates: PriceUpdate[], today:
   });
 }
 
-/** Serve a togliere un errore di battitura dallo storico. L'ultimo rimasto resta: senza, lo strumento sparirebbe. */
+export interface QuoteUpdate {
+  holdingId: string;
+  date: IsoDate;
+  priceMicros: number;
+}
+
+/** Scrive i prezzi letti in automatico e dice quanti sono cambiati. Non si annulla: non è un'azione della persona. */
+export async function recordQuotes(quotes: QuoteUpdate[], today: IsoDate): Promise<number> {
+  if (quotes.length === 0) return 0;
+  return db.transaction('rw', db.holdingSnapshots, async () => {
+    const grouped = snapshotsByHolding(await db.holdingSnapshots.toArray());
+    const changes: HoldingSnapshot[] = [];
+    for (const { holdingId, date: quoteDate, priceMicros } of quotes) {
+      const list = grouped.get(holdingId) ?? [];
+      const latest = list.at(-1);
+      // Lo strumento può essere stato eliminato mentre si leggeva il prezzo.
+      if (!latest || !isMicros(priceMicros) || priceMicros === 0) continue;
+      const date = quoteDate > today ? today : quoteDate;
+      const sameDay = list.find((snapshot) => snapshot.date === date);
+      if (sameDay) {
+        if (sameDay.priceMicros !== priceMicros) changes.push({ ...sameDay, priceMicros });
+      } else if (date > latest.date) {
+        changes.push({ id: snapshotId(holdingId, date), holdingId, date, priceMicros });
+      }
+    }
+    if (changes.length > 0) await db.holdingSnapshots.bulkPut(changes);
+    return changes.length;
+  });
+}
+
+/** Collega uno strumento alla fonte dei prezzi, completando l'ISIN se manca. */
+export async function linkHolding(id: string, match: InstrumentMatch): Promise<void> {
+  await db.transaction('rw', db.holdings, async () => {
+    const holding = await db.holdings.get(id);
+    if (holding) await db.holdings.put({ ...holding, quoteSource: match.source, isin: holding.isin || match.isin });
+  });
+}
+
+/** Serve a togliere un errore di battitura dallo storico. L'ultimo con le quote resta: senza, lo strumento sparirebbe. */
 export async function deleteSnapshot(id: string): Promise<Undo> {
   return db.transaction('rw', db.holdingSnapshots, async () => {
     const snapshot = await db.holdingSnapshots.get(id);
     if (!snapshot) throw new Error('L’aggiornamento non esiste più');
-    const count = await db.holdingSnapshots.where('holdingId').equals(snapshot.holdingId).count();
-    if (count <= 1) throw new Error('È l’unico aggiornamento: per toglierlo elimina lo strumento');
+    const rows = await db.holdingSnapshots.where('holdingId').equals(snapshot.holdingId).toArray();
+    if (hasPosition(snapshot) && rows.filter(hasPosition).length <= 1) {
+      throw new Error('È l’unico aggiornamento con le quote: per toglierlo elimina lo strumento');
+    }
     await db.holdingSnapshots.delete(id);
     return () => db.holdingSnapshots.add(snapshot).then(() => undefined);
   });

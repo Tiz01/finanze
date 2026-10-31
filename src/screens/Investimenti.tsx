@@ -2,10 +2,11 @@ import { useMemo, useState } from 'react';
 import { useData } from '../db/DataProvider';
 import { createHolding, deleteHolding, deleteSnapshot, recordPrices, updateHolding, type PriceUpdate } from '../db/investments';
 import { computeBalances } from '../domain/balances';
-import { formatFullDate, formatShortDate } from '../domain/dates';
+import { daysBetween, formatFullDate, formatShortDate } from '../domain/dates';
 import {
   activeHoldings,
   formatMicros,
+  hasPosition,
   investmentSeries,
   parseMicros,
   portfolioTotals,
@@ -16,7 +17,9 @@ import {
   type HoldingSummary,
 } from '../domain/investments';
 import { formatCents, formatSignedCents, formatSignedRate } from '../domain/money';
+import { isIsin, isSearchable, normalizeCode } from '../domain/quotes';
 import type { IsoDate } from '../domain/types';
+import { usePriceSyncState, useInstrumentLookup, type InstrumentLookup, type PriceSyncState } from '../quotes';
 import { routeHref } from '../router';
 import { Button, ButtonLink, DateChip, Field, ListGroup, SectionTitle, SelectChip, SelectInput, TextInput } from '../ui/controls';
 import { notify, notifyError } from '../ui/feedback';
@@ -27,8 +30,9 @@ import { StatGrid, StatTile } from '../ui/stats';
 import { useToday } from '../ui/useToday';
 import { ValueChart } from '../ui/ValueChart';
 
-const BACK = { href: routeHref('home'), label: 'Home' };
 const ALL_INSTRUMENTS = '';
+// Oltre questi giorni non è un fine settimana o una festa: il prezzo si è proprio fermato.
+const STALE_PRICE_DAYS = 7;
 
 function gainText(gainCents: number, gainRate: number | null): string {
   return `${formatSignedCents(gainCents)}${gainRate === null ? '' : ` (${formatSignedRate(gainRate)})`}`;
@@ -50,6 +54,53 @@ function NumberInput({ value, onChange }: { value: string; onChange: (value: str
       autoComplete="off"
       className="tabular-nums"
     />
+  );
+}
+
+function LookupStatus({
+  lookup,
+  code,
+  hasText,
+  keptPrice,
+  today,
+}: {
+  lookup: InstrumentLookup;
+  code: string;
+  hasText: boolean;
+  /** L'ultimo prezzo di uno strumento già collegato, se adesso non si riesce a leggerlo. */
+  keptPrice: number | null;
+  today: IsoDate;
+}) {
+  if (lookup.status === 'found') {
+    const { match, quote } = lookup;
+    return (
+      <div className="rounded-xl bg-bg px-3 py-2 text-sm" aria-live="polite">
+        <p className="font-medium">{match.name}</p>
+        <p className="text-muted tabular-nums">
+          {formatMicros(quote.priceMicros, 2)} € · {quote.market} · {formatShortDate(quote.date, today).toLowerCase()}. Si aggiorna da solo.
+        </p>
+      </div>
+    );
+  }
+
+  let text = 'Scrivi il codice o l’ISIN dello strumento: il prezzo arriva da solo.';
+  if (lookup.status === 'searching') text = 'Cerco il prezzo…';
+  if (lookup.status === 'idle' && hasText) text = 'Per il prezzo automatico serve il codice o l’ISIN. Altrimenti scrivi il prezzo qui sotto.';
+  if (lookup.status === 'notFound') {
+    text = isIsin(code)
+      ? 'Nessun prezzo in euro per questo ISIN: scrivilo qui sotto.'
+      : `Nessun prezzo per «${code}». Prova con l’ISIN, che trovi nell’app del broker, oppure scrivilo qui sotto.`;
+  }
+  if (lookup.status === 'failed') {
+    text =
+      keptPrice === null
+        ? 'Non riesco a cercare il prezzo adesso: controlla la rete, oppure scrivilo qui sotto.'
+        : `Non riesco a leggere il prezzo adesso: resta l’ultimo, ${formatMicros(keptPrice, 2)} €.`;
+  }
+  return (
+    <p className="text-sm text-muted" aria-live="polite">
+      {text}
+    </p>
   );
 }
 
@@ -81,23 +132,54 @@ function HoldingForm({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState('');
 
+  const code = normalizeCode(isin) || normalizeCode(instrument);
+  const lookup = useInstrumentLookup(code);
+
+  // Uno strumento già collegato resta automatico anche se in questo momento manca la rete.
+  const keepLink =
+    holding?.quoteSource !== undefined &&
+    summary !== undefined &&
+    code === normalizeCode(holding.isin || holding.instrument) &&
+    (lookup.status === 'failed' || lookup.status === 'searching');
+  const automatic =
+    lookup.status === 'found'
+      ? { source: lookup.match.source, isin: lookup.match.isin, name: lookup.match.name, priceMicros: lookup.quote.priceMicros }
+      : keepLink
+        ? { source: holding.quoteSource as string, isin: holding.isin, name: holding.instrument, priceMicros: summary.priceMicros }
+        : null;
+  const waiting = lookup.status === 'searching' && !automatic && !holding;
+  const hasText = code !== '';
+  const showManual = !automatic && !waiting && hasText;
+
   const quantity = parseMicros(quantityText);
   const avg = parseMicros(avgText);
-  const price = parseMicros(priceText);
-  const history = holding ? [...(snapshotsByHolding(holdingSnapshots).get(holding.id) ?? [])].reverse() : [];
+  const price = automatic ? automatic.priceMicros : parseMicros(priceText);
+
+  const rows = holding ? (snapshotsByHolding(holdingSnapshots).get(holding.id) ?? []) : [];
+  const positionCount = rows.filter(hasPosition).length;
+  // Nei prezzi automatici ogni giorno ha la sua riga: qui contano solo quote e prezzo di acquisto.
+  const history = [...rows].reverse().filter((row) => !automatic || hasPosition(row));
 
   async function save() {
+    if (!hasText) return setError('Scrivi il codice o il nome dello strumento');
+    if (waiting) return setError('Aspetta un attimo: sto cercando il prezzo');
     if (quantity === null) return setError('Scrivi le quote come numero, per esempio 12,5');
-    if (avg === null) return setError('Scrivi il prezzo medio come numero, per esempio 150,25');
+    if (avg === null) return setError('Scrivi il prezzo di acquisto come numero, per esempio 150,25');
     if (price === null) return setError('Scrivi il prezzo attuale come numero, per esempio 168,39');
 
-    const draft = { accountId, instrument, isin };
-    const position = { date, quantityMicros: quantity, avgPriceMicros: avg, priceMicros: price };
+    const draft = {
+      accountId,
+      // I codici in maiuscolo, come li mostra il broker.
+      instrument: isSearchable(normalizeCode(instrument)) ? normalizeCode(instrument) : instrument.trim() || automatic?.name || isin,
+      isin: isin.trim() || automatic?.isin || '',
+      ...(automatic ? { quoteSource: automatic.source } : {}),
+    };
+    const position = { date: automatic ? today : date, quantityMicros: quantity, avgPriceMicros: avg, priceMicros: price };
     try {
       if (holding) {
         // Con gli stessi numeri e la data proposta sono cambiati solo nome, ISIN o conto.
-        const unchanged =
-          date === today && summary?.quantityMicros === quantity && summary.avgPriceMicros === avg && summary.priceMicros === price;
+        const samePosition = summary?.quantityMicros === quantity && summary.avgPriceMicros === avg;
+        const unchanged = position.date === today && samePosition && (automatic !== null || summary?.priceMicros === price);
         await updateHolding(holding.id, draft, unchanged ? null : position, today);
       } else {
         await createHolding(draft, position, today);
@@ -135,10 +217,11 @@ function HoldingForm({
           <Field label="Nome o codice">
             <TextInput value={instrument} onChange={(event) => setInstrument(event.target.value)} placeholder="Es. codice ETF" autoComplete="off" autoCapitalize="characters" />
           </Field>
-          <Field label="ISIN (facoltativo)">
+          <Field label="ISIN">
             <TextInput value={isin} onChange={(event) => setIsin(event.target.value)} autoComplete="off" autoCapitalize="characters" />
           </Field>
         </div>
+        <LookupStatus lookup={lookup} code={code} hasText={hasText} keptPrice={keepLink ? summary.priceMicros : null} today={today} />
         <Field label="Conto">
           <SelectInput value={accountId} onChange={setAccountId} options={options} />
         </Field>
@@ -146,25 +229,29 @@ function HoldingForm({
           <Field label="Quote">
             <NumberInput value={quantityText} onChange={setQuantityText} />
           </Field>
-          <Field label="Prezzo medio (€)">
+          <Field label="Prezzo di acquisto (€)">
             <NumberInput value={avgText} onChange={setAvgText} />
           </Field>
-          <Field label="Prezzo attuale (€)">
-            <NumberInput value={priceText} onChange={setPriceText} />
-          </Field>
-          <Field label="Data">
-            <TextInput
-              type="date"
-              value={date}
-              max={today}
-              onChange={(event) => {
-                if (event.target.value) setDate(event.target.value);
-              }}
-            />
-          </Field>
+          {showManual && (
+            <>
+              <Field label="Prezzo attuale (€)">
+                <NumberInput value={priceText} onChange={setPriceText} />
+              </Field>
+              <Field label="Data">
+                <TextInput
+                  type="date"
+                  value={date}
+                  max={today}
+                  onChange={(event) => {
+                    if (event.target.value) setDate(event.target.value);
+                  }}
+                />
+              </Field>
+            </>
+          )}
         </div>
         <p className="text-sm text-muted">
-          Copia i numeri dal portafoglio del broker. Per un’obbligazione, le quote sono il nominale diviso 100.
+          Se hai comprato più volte, usa il prezzo medio di carico che vedi nel portafoglio del broker. Per un’obbligazione, le quote sono il nominale diviso 100.
         </p>
         {quantity !== null && avg !== null && price !== null && (
           <p className="rounded-xl bg-bg px-3 py-2 text-sm">
@@ -188,16 +275,18 @@ function HoldingForm({
           <div>
             <span className="mb-1 block text-sm font-medium text-muted">Aggiornamenti</span>
             <div className="divide-y divide-line overflow-hidden rounded-2xl bg-bg text-sm">
-              {history.map((snapshot) => (
-                <div key={snapshot.id} className="flex min-h-12 items-center gap-3 px-3 py-1.5">
+              {history.map((row) => (
+                <div key={row.id} className="flex min-h-12 items-center gap-3 px-3 py-1.5">
                   <span className="min-w-0 flex-1">
-                    <span className="block">{formatFullDate(snapshot.date)}</span>
+                    <span className="block">{formatFullDate(row.date)}</span>
                     <span className="block truncate text-xs text-muted tabular-nums">
-                      {formatMicros(snapshot.quantityMicros)} quote · {formatMicros(snapshot.priceMicros, 2)} €
+                      {hasPosition(row)
+                        ? `${formatMicros(row.quantityMicros)} quote · acquisto ${formatMicros(row.avgPriceMicros, 2)} €${automatic ? '' : ` · ora ${formatMicros(row.priceMicros, 2)} €`}`
+                        : `Prezzo ${formatMicros(row.priceMicros, 2)} €`}
                     </span>
                   </span>
-                  {history.length > 1 && (
-                    <button type="button" onClick={() => void removeUpdate(snapshot.id)} className="min-h-10 shrink-0 px-1 font-medium text-danger">
+                  {(!hasPosition(row) || positionCount > 1) && (
+                    <button type="button" onClick={() => void removeUpdate(row.id)} className="min-h-10 shrink-0 px-1 font-medium text-danger">
                       Elimina
                     </button>
                   )}
@@ -251,7 +340,7 @@ function PricesForm({ summaries, today, onClose }: { summaries: HoldingSummary[]
   return (
     <Sheet title="Aggiorna i prezzi" onClose={onClose}>
       <div className="space-y-3">
-        <p className="text-sm text-muted">Leggili nell’app del broker. Quote e prezzo medio restano quelli che hai già.</p>
+        <p className="text-sm text-muted">Leggili nell’app del broker. Quote e prezzo di acquisto restano quelli che hai già.</p>
         <DateChip label={formatShortDate(date, today)} ariaLabel="Data dei prezzi" value={date} onChange={setDate} />
         {summaries.map(({ holding, priceDate, priceMicros }) => (
           <Field
@@ -275,6 +364,22 @@ function PricesForm({ summaries, today, onClose }: { summaries: HoldingSummary[]
   );
 }
 
+function PriceNote({ summaries, syncState, today }: { summaries: HoldingSummary[]; syncState: PriceSyncState; today: IsoDate }) {
+  const automatic = summaries.filter(({ holding }) => holding.quoteSource);
+  const manualCount = summaries.length - automatic.length;
+  const oldest = portfolioTotals(automatic.length > 0 ? automatic : summaries).oldestPriceDate ?? today;
+  const age = priceAgeLabel(oldest, today);
+
+  let text = `Calcolati con i ${age}: si aggiornano quando li inserisci tu.`;
+  if (automatic.length > 0) {
+    const others = manualCount === 0 ? '' : manualCount === 1 ? ' Uno strumento lo aggiorni tu.' : ` ${manualCount} strumenti li aggiorni tu.`;
+    if (syncState === 'failed') text = `Non riesco a leggere i prezzi automatici: restano i ${age}.${others}`;
+    else if (daysBetween(oldest, today) > STALE_PRICE_DAYS) text = `Dai prezzi automatici non arriva niente di più recente: restano i ${age}.${others}`;
+    else text = `Prezzi automatici da onvista, con qualche minuto di ritardo.${others}`;
+  }
+  return <p className="border-t border-line px-4 py-2 text-xs text-muted">{text}</p>;
+}
+
 function HoldingRow({ summary, onPress }: { summary: HoldingSummary; onPress: () => void }) {
   const { gainCents, gainRate, holding, priceMicros, quantityMicros, valueCents } = summary;
   return (
@@ -282,7 +387,7 @@ function HoldingRow({ summary, onPress }: { summary: HoldingSummary; onPress: ()
       <span className="min-w-0 flex-1">
         <span className="block truncate">{holding.instrument}</span>
         <span className="block truncate text-xs text-muted tabular-nums">
-          {formatMicros(quantityMicros)} quote · {formatMicros(priceMicros, 2)} €
+          {formatMicros(quantityMicros)} quote · {formatMicros(priceMicros, 2)} €{holding.quoteSource ? '' : ' · a mano'}
         </span>
       </span>
       <span className="shrink-0 text-right">
@@ -296,6 +401,7 @@ function HoldingRow({ summary, onPress }: { summary: HoldingSummary; onPress: ()
 export function Investimenti() {
   const { accounts, holdings, holdingSnapshots, transactions } = useData();
   const today = useToday();
+  const syncState = usePriceSyncState();
 
   // `new` apre il modulo vuoto; altrimenti è lo strumento da modificare.
   const [editing, setEditing] = useState<string | 'new' | null>(null);
@@ -316,7 +422,7 @@ export function Investimenti() {
 
   if (investmentAccounts.length === 0) {
     return (
-      <Screen title="Investimenti" back={BACK}>
+      <Screen title="Investimenti">
         <section className="space-y-3 rounded-2xl bg-surface p-4">
           <h2 className="font-semibold">Per iniziare, crea il conto del tuo broker</h2>
           <p className="text-sm text-muted">In Conti scegli il tipo Investimento: non entrerà nella liquidità disponibile.</p>
@@ -325,6 +431,10 @@ export function Investimenti() {
       </Screen>
     );
   }
+
+  // A mano si aggiornano quelli senza prezzo automatico, e tutti se la lettura automatica non funziona.
+  const manual = syncState === 'failed' ? summaries : summaries.filter(({ holding }) => !holding.quoteSource);
+  const hasAutomatic = summaries.some(({ holding }) => holding.quoteSource);
 
   const hero =
     summaries.length > 0 ? (
@@ -335,7 +445,7 @@ export function Investimenti() {
     ) : undefined;
 
   return (
-    <Screen title="Investimenti" hero={hero} back={BACK}>
+    <Screen title="Investimenti" hero={hero}>
       {summaries.length > 0 && (
         <>
           <div className="rounded-2xl bg-surface">
@@ -348,15 +458,13 @@ export function Investimenti() {
                 negative={totals.gainCents < 0}
               />
             </StatGrid>
-            {totals.oldestPriceDate && (
-              <p className="border-t border-line px-4 py-2 text-xs text-muted">
-                Calcolati con i {priceAgeLabel(totals.oldestPriceDate, today)}: si aggiornano quando li inserisci tu.
-              </p>
-            )}
+            <PriceNote summaries={summaries} syncState={syncState} today={today} />
           </div>
-          <Button className="mt-3 w-full" onClick={() => setUpdatingPrices(true)}>
-            Aggiorna i prezzi
-          </Button>
+          {manual.length > 0 && (
+            <Button className="mt-3 w-full" onClick={() => setUpdatingPrices(true)}>
+              Aggiorna i prezzi
+            </Button>
+          )}
         </>
       )}
 
@@ -416,7 +524,11 @@ export function Investimenti() {
             {series.length >= 2 ? (
               <ValueChart points={series} today={today} baselineLabel="Costo di acquisto" />
             ) : (
-              <p className="text-sm text-muted">La linea compare da domani: ogni aggiornamento dei prezzi aggiunge un pezzo di storia.</p>
+              <p className="text-sm text-muted">
+                {hasAutomatic
+                  ? 'La linea compare nei prossimi giorni: ogni volta che apri l’app si aggiunge il prezzo del giorno.'
+                  : 'La linea compare da domani: ogni aggiornamento dei prezzi aggiunge un pezzo di storia.'}
+              </p>
             )}
           </div>
         </>
@@ -431,7 +543,7 @@ export function Investimenti() {
           onClose={() => setEditing(null)}
         />
       )}
-      {updatingPrices && <PricesForm summaries={summaries} today={today} onClose={() => setUpdatingPrices(false)} />}
+      {updatingPrices && <PricesForm summaries={manual} today={today} onClose={() => setUpdatingPrices(false)} />}
     </Screen>
   );
 }

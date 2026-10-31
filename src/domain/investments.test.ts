@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   activeHoldings,
   formatMicros,
+  hasPosition,
   investmentSeries,
   parseMicros,
   portfolioTotals,
+  positionAt,
   positionValueCents,
   priceAgeLabel,
   snapshotAt,
@@ -273,5 +275,55 @@ describe('priceAgeLabel', () => {
     expect(priceAgeLabel(today, today)).toBe('prezzi di oggi');
     expect(priceAgeLabel('2026-10-29', today)).toBe('prezzi di ieri');
     expect(priceAgeLabel('2026-10-20', today)).toBe('prezzi di 10 giorni fa');
+  });
+});
+
+describe('righe del solo prezzo', () => {
+  function price(holdingId: string, date: string, value: number): HoldingSnapshot {
+    return { id: `${holdingId}|${date}`, holdingId, date, priceMicros: Math.round(value * 1_000_000) };
+  }
+
+  it('prendono quote e prezzo medio dall’ultima riga che li ha', () => {
+    const [summary] = summarizeHoldings(
+      [holding('a')],
+      [snapshot('a', '2026-10-01', 10, 100, 100), price('a', '2026-10-20', 120)],
+      today,
+    );
+    expect(summary).toMatchObject({ quantityMicros: 10_000_000, avgPriceMicros: 100_000_000, priceMicros: 120_000_000, priceDate: '2026-10-20', valueCents: 120_000, gainCents: 20_000 });
+  });
+
+  it('un nuovo acquisto vale dalla sua data in poi', () => {
+    const points = investmentSeries(
+      [holding('a')],
+      [snapshot('a', '2026-10-28', 10, 100, 100), price('a', '2026-10-29', 110), snapshot('a', '2026-10-30', 20, 105, 120)],
+      today,
+    );
+    expect(points.map(({ cents, baselineCents }) => [cents, baselineCents])).toEqual([
+      [100_000, 100_000],
+      [110_000, 100_000],
+      [240_000, 210_000],
+    ]);
+  });
+
+  it('senza una riga con le quote lo strumento non ha valore', () => {
+    expect(summarizeHoldings([holding('a')], [price('a', '2026-10-20', 120)], today)).toEqual([]);
+    expect(investmentSeries([holding('a')], [price('a', '2026-10-20', 120)], today)).toEqual([]);
+  });
+
+  it('la linea parte dalla prima riga con le quote, non dal primo prezzo', () => {
+    const points = investmentSeries(
+      [holding('a')],
+      [price('a', '2026-10-20', 120), snapshot('a', '2026-10-29', 10, 100, 110), price('a', '2026-10-30', 130)],
+      today,
+    );
+    expect(points.map(({ date }) => date)).toEqual(['2026-10-29', '2026-10-30']);
+    expect(points.at(-1)).toMatchObject({ cents: 130_000, baselineCents: 100_000 });
+  });
+
+  it('riconosce le righe con le quote', () => {
+    expect(hasPosition(snapshot('a', '2026-10-01', 1, 1, 1))).toBe(true);
+    expect(hasPosition(price('a', '2026-10-01', 1))).toBe(false);
+    expect(positionAt([snapshot('a', '2026-10-01', 1, 1, 1), price('a', '2026-10-02', 2)], '2026-10-30')?.date).toBe('2026-10-01');
+    expect(positionAt([snapshot('a', '2026-10-01', 1, 1, 1)], '2026-09-30')).toBeUndefined();
   });
 });

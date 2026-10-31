@@ -3,7 +3,7 @@ import { addDays, daysBetween } from './dates';
 import { groupThousands } from './money';
 import type { Account, Holding, HoldingSnapshot, IsoDate } from './types';
 
-const MICROS = 1_000_000;
+export const MICROS = 1_000_000;
 const MAX_WHOLE_UNITS = 1_000_000_000;
 const MAX_SERIES_POINTS = 400;
 
@@ -87,9 +87,20 @@ export function snapshotsByHolding(snapshots: HoldingSnapshot[]): Map<string, Ho
   return grouped;
 }
 
-/** L'ultimo aggiornamento fino a quella data. */
+/** L'ultimo aggiornamento fino a quella data: dà il prezzo. */
 export function snapshotAt(sorted: HoldingSnapshot[], date: IsoDate): HoldingSnapshot | undefined {
   return sorted.findLast((snapshot) => snapshot.date <= date);
+}
+
+type PositionSnapshot = HoldingSnapshot & { quantityMicros: number; avgPriceMicros: number };
+
+export function hasPosition(snapshot: HoldingSnapshot): snapshot is PositionSnapshot {
+  return snapshot.quantityMicros !== undefined && snapshot.avgPriceMicros !== undefined;
+}
+
+/** L'ultimo aggiornamento con le quote fino a quella data: dà quote e prezzo medio. */
+export function positionAt(sorted: HoldingSnapshot[], date: IsoDate): PositionSnapshot | undefined {
+  return sorted.findLast((snapshot): snapshot is PositionSnapshot => snapshot.date <= date && hasPosition(snapshot));
 }
 
 export interface HoldingSummary {
@@ -113,9 +124,12 @@ function rate(gainCents: number, costCents: number): number | null {
 export function summarizeHoldings(holdings: Holding[], snapshots: HoldingSnapshot[], today: IsoDate): HoldingSummary[] {
   const grouped = snapshotsByHolding(snapshots);
   return holdings.flatMap((holding) => {
-    const latest = snapshotAt(grouped.get(holding.id) ?? [], today);
-    if (!latest) return [];
-    const { avgPriceMicros, date, priceMicros, quantityMicros } = latest;
+    const list = grouped.get(holding.id) ?? [];
+    const latest = snapshotAt(list, today);
+    const position = positionAt(list, today);
+    if (!latest || !position) return [];
+    const { date, priceMicros } = latest;
+    const { avgPriceMicros, quantityMicros } = position;
     const valueCents = positionValueCents(quantityMicros, priceMicros);
     const costCents = positionValueCents(quantityMicros, avgPriceMicros);
     const gainCents = valueCents - costCents;
@@ -176,7 +190,7 @@ export interface InvestmentPoint {
 export function investmentSeries(holdings: Holding[], snapshots: HoldingSnapshot[], today: IsoDate): InvestmentPoint[] {
   const ids = new Set(holdings.map(({ id }) => id));
   const lists = [...snapshotsByHolding(snapshots.filter(({ holdingId, date }) => ids.has(holdingId) && date <= today)).values()];
-  const firstDates = lists.map((list) => list[0]?.date ?? today);
+  const firstDates = lists.flatMap((list) => list.find(hasPosition)?.date ?? []);
   if (firstDates.length === 0) return [];
   const start = firstDates.reduce((first, date) => (date < first ? date : first));
 
@@ -185,10 +199,11 @@ export function investmentSeries(holdings: Holding[], snapshots: HoldingSnapshot
     let cents = 0;
     let baselineCents = 0;
     for (const list of lists) {
-      const snapshot = snapshotAt(list, date);
-      if (!snapshot) continue;
-      cents += positionValueCents(snapshot.quantityMicros, snapshot.priceMicros);
-      baselineCents += positionValueCents(snapshot.quantityMicros, snapshot.avgPriceMicros);
+      const latest = snapshotAt(list, date);
+      const position = positionAt(list, date);
+      if (!latest || !position) continue;
+      cents += positionValueCents(position.quantityMicros, latest.priceMicros);
+      baselineCents += positionValueCents(position.quantityMicros, position.avgPriceMicros);
     }
     points.push({ date, cents, baselineCents });
   }

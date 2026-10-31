@@ -1,5 +1,6 @@
 import { defaultBudgets } from './budgets';
 import { daysBetween, isValidIsoDate, toIsoDate } from './dates';
+import { isQuoteSource } from './quotes';
 import { validateRule } from './recurring';
 import { mappingShapeProblem } from './statementMapping';
 import { compareNewestFirst, validateTransaction } from './transactions';
@@ -20,7 +21,7 @@ import {
 } from './types';
 
 /** Stessa versione dello schema Dexie: va aumentata insieme a ogni migrazione. */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 const APP_ID = 'finanze';
 
@@ -219,13 +220,16 @@ function holdingProblem(holding: Holding, accountIds: Set<string>): string | nul
   if (!isNonEmptyString(holding.instrument)) return 'manca il nome';
   if (typeof holding.isin !== 'string') return 'l’ISIN non è valido';
   if (!accountIds.has(holding.accountId)) return 'il conto non esiste';
+  if (holding.quoteSource !== undefined && !isQuoteSource(holding.quoteSource)) return 'la fonte dei prezzi non è valida';
   return isNonEmptyString(holding.createdAt) ? null : 'manca la data di inserimento';
 }
 
 function holdingSnapshotProblem(snapshot: HoldingSnapshot, holdingIds: Set<string>): string | null {
   if (!holdingIds.has(snapshot.holdingId)) return 'lo strumento non esiste';
   if (!isValidIsoDate(snapshot.date)) return 'la data non è valida';
-  const values = [snapshot.quantityMicros, snapshot.avgPriceMicros, snapshot.priceMicros];
+  const { avgPriceMicros, priceMicros, quantityMicros } = snapshot;
+  if ((quantityMicros === undefined) !== (avgPriceMicros === undefined)) return 'quote o prezzi non sono validi';
+  const values = [priceMicros, quantityMicros ?? 0, avgPriceMicros ?? 0];
   return values.every((value) => Number.isSafeInteger(value) && value >= 0) ? null : 'quote o prezzi non sono validi';
 }
 

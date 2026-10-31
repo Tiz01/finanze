@@ -4,6 +4,7 @@ import { openNewEntry } from './entryStore';
 
 const ICONS: Record<Tab, ReactNode> = {
   home: <path d="M3.5 11 12 4l8.5 7M6 9.5V20h12V9.5" />,
+  investimenti: <path d="m4 17 5-5 4 3 7-8M15 7h5v5" />,
   movimenti: <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />,
   report: <path d="M5 20v-7M12 20V5M19 20v-10" />,
   impostazioni: <path d="M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4" />,
@@ -11,6 +12,7 @@ const ICONS: Record<Tab, ReactNode> = {
 
 const LABELS: Record<Tab, string> = {
   home: 'Home',
+  investimenti: 'Investimenti',
   movimenti: 'Movimenti',
   report: 'Report',
   impostazioni: 'Impostazioni',
@@ -22,7 +24,7 @@ function TabLink({ tab, current }: { tab: Tab; current: Tab }) {
     <a
       href={routeHref(tab)}
       aria-current={active ? 'page' : undefined}
-      className={`flex min-h-12 flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${
+      className={`flex min-h-12 flex-col items-center justify-center gap-0.5 text-[length:clamp(9px,2.6vw,10.5px)] font-medium whitespace-nowrap ${
         active ? 'text-accent' : 'text-muted'
       }`}
     >
@@ -46,9 +48,13 @@ function TabLink({ tab, current }: { tab: Tab; current: Tab }) {
 export function TabBar({ current }: { current: Tab }) {
   return (
     <nav aria-label="Schermate" className="border-t border-line bg-surface pb-safe">
-      <div className="grid grid-cols-5 items-center px-1 pt-1">
+      {/* Sei posti: con cinque schede il + non può più stare al centro, a destra resta sotto il pollice. */}
+      <div className="grid grid-cols-6 items-center px-1 pt-1">
         <TabLink tab="home" current={current} />
+        <TabLink tab="investimenti" current={current} />
         <TabLink tab="movimenti" current={current} />
+        <TabLink tab="report" current={current} />
+        <TabLink tab="impostazioni" current={current} />
         <div className="flex justify-center">
           <button
             type="button"
@@ -69,8 +75,6 @@ export function TabBar({ current }: { current: Tab }) {
             </svg>
           </button>
         </div>
-        <TabLink tab="report" current={current} />
-        <TabLink tab="impostazioni" current={current} />
       </div>
     </nav>
   );

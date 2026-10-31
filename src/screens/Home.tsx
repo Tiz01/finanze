@@ -4,8 +4,7 @@ import { backupReminder } from '../domain/backup';
 import { computeBalances, liquidityCents } from '../domain/balances';
 import { budgetProgress } from '../domain/budgets';
 import { formatMonthYear, startOfMonth } from '../domain/dates';
-import { formatCents, formatRate, formatSignedCents, formatSignedRate } from '../domain/money';
-import { activeHoldings, portfolioTotals, priceAgeLabel, summarizeHoldings, type PortfolioTotals } from '../domain/investments';
+import { formatCents, formatRate } from '../domain/money';
 import { lastVerifiedDate, verifiedLabel } from '../domain/reconcile';
 import { summarizePeriod } from '../domain/reports';
 import type { Account } from '../domain/types';
@@ -43,45 +42,9 @@ function AccountRow({
   );
 }
 
-function InvestmentRow({
-  account,
-  balance,
-  totals,
-  today,
-}: {
-  account: Account;
-  balance: number;
-  totals: PortfolioTotals;
-  today: string;
-}) {
-  const { costCents, gainCents, gainRate, oldestPriceDate, valueCents } = totals;
-  const hasInstruments = oldestPriceDate !== null;
-  return (
-    <a href={routeHref('home/investimenti')} className="flex min-h-14 w-full items-center gap-3 px-4 py-2.5 active:bg-bg">
-      <span className="min-w-0 flex-1">
-        <span className="block truncate">{account.name}</span>
-        <span className="block truncate text-xs text-muted">
-          {hasInstruments ? priceAgeLabel(oldestPriceDate, today) : 'Nessuno strumento'}
-        </span>
-      </span>
-      <span className="shrink-0 text-right">
-        <span className="block tabular-nums">{formatCents(hasInstruments ? valueCents : balance)}</span>
-        {hasInstruments && costCents > 0 ? (
-          <span className={`block text-xs font-medium tabular-nums ${gainCents < 0 ? 'text-danger' : 'text-positive'}`}>
-            {formatSignedCents(gainCents)}
-            {gainRate !== null && ` (${formatSignedRate(gainRate)})`}
-          </span>
-        ) : (
-          <span className="block text-xs font-medium text-accent">{hasInstruments ? 'Apri' : 'Aggiungi strumenti'}</span>
-        )}
-      </span>
-    </a>
-  );
-}
-
 export function Home() {
   const data = useData();
-  const { accounts, budgets, holdings, holdingSnapshots, reconciliations, settings, transactions } = data;
+  const { accounts, budgets, reconciliations, settings, transactions } = data;
   const today = useToday();
 
   const balances = useMemo(() => computeBalances(accounts, transactions, today), [accounts, transactions, today]);
@@ -92,12 +55,7 @@ export function Home() {
   const liquidityText = formatCents(liquidity);
   const active = accounts.filter((account) => !account.archived);
   const liquid = active.filter((account) => account.contaComeLiquidita);
-  const investments = active.filter((account) => !account.contaComeLiquidita && account.type === 'investimento');
   const others = active.filter((account) => !account.contaComeLiquidita && account.type !== 'investimento');
-  const instruments = useMemo(
-    () => summarizeHoldings(activeHoldings(holdings, accounts), holdingSnapshots, today),
-    [accounts, holdings, holdingSnapshots, today],
-  );
   const hasData = accounts.length > 0 || transactions.length > 0;
   const reminder = backupReminder(settings.lastBackupAt, hasData && !settings.demoLoaded, today);
 
@@ -164,22 +122,6 @@ export function Home() {
             <>
               <SectionTitle>Fuori dalla liquidità</SectionTitle>
               <ListGroup>{others.map(row)}</ListGroup>
-            </>
-          )}
-          {investments.length > 0 && (
-            <>
-              <SectionTitle>Investimenti</SectionTitle>
-              <ListGroup>
-                {investments.map((account) => (
-                  <InvestmentRow
-                    key={account.id}
-                    account={account}
-                    balance={balances.get(account.id) ?? 0}
-                    totals={portfolioTotals(instruments.filter(({ holding }) => holding.accountId === account.id))}
-                    today={today}
-                  />
-                ))}
-              </ListGroup>
             </>
           )}
         </>

@@ -3,12 +3,12 @@ import Dexie from 'dexie';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { buildBackup, parseBackup, serializeBackup } from '../domain/backup';
 import { computeBalances, liquidityCents } from '../domain/balances';
-import { portfolioTotals, summarizeHoldings } from '../domain/investments';
+import { investmentSeries, portfolioTotals, summarizeHoldings } from '../domain/investments';
 import { summarizePeriod } from '../domain/reports';
 import { createAccount, deleteAccount, updateAccount, type AccountDraft } from './accounts';
 import { clearAllData, loadDemoData, readAllData, replaceAllData } from './data';
 import { db } from './db';
-import { createHolding, deleteHolding, deleteSnapshot, recordPrices, updateHolding, type PositionDraft } from './investments';
+import { createHolding, deleteHolding, deleteSnapshot, linkHolding, recordPrices, recordQuotes, updateHolding, type PositionDraft } from './investments';
 import { addTransaction } from './transactions';
 
 const today = '2026-10-30';
@@ -65,7 +65,7 @@ describe('strumenti', () => {
     await expect(etfA({ date: '2026-10-31' })).rejects.toThrow(/futura/);
     await expect(etfA({ date: 'ieri' })).rejects.toThrow(/Data/);
     await expect(etfA({ priceMicros: 0 })).rejects.toThrow(/attuale/);
-    await expect(etfA({ avgPriceMicros: 1.5 })).rejects.toThrow(/medio/);
+    await expect(etfA({ avgPriceMicros: 1.5 })).rejects.toThrow(/acquisto/);
     await expect(etfA({ quantityMicros: -1 })).rejects.toThrow(/Quote/);
   });
 
@@ -116,14 +116,23 @@ describe('prezzi', () => {
     const data = await readAllData();
     expect(data.holdingSnapshots).toHaveLength(2);
     expect(summarizeHoldings(data.holdings, data.holdingSnapshots, today)[0]).toMatchObject({ priceMicros: 160_000_000, priceDate: '2026-10-01' });
-    expect((await db.holdingSnapshots.get(`${id}|2026-09-01`))?.quantityMicros).toBe(30_000_000);
+    expect(await db.holdingSnapshots.get(`${id}|2026-09-01`)).toEqual({ id: `${id}|2026-09-01`, holdingId: id, date: '2026-09-01', priceMicros: 140_000_000 });
   });
 
   it('usa quote e prezzo medio di quella data', async () => {
     const id = await etfA();
     await updateHolding(id, { accountId: brokerId, instrument: 'ETF-A', isin: '' }, position({ date: '2026-10-20', quantityMicros: 40_000_000 }), today);
     await recordPrices('2026-10-10', [{ holdingId: id, priceMicros: 165_000_000 }], today);
-    expect((await db.holdingSnapshots.get(`${id}|2026-10-10`))?.quantityMicros).toBe(30_000_000);
+    const data = await readAllData();
+    const points = investmentSeries(data.holdings, data.holdingSnapshots, today);
+    expect(points.find(({ date }) => date === '2026-10-10')).toMatchObject({ cents: 495_000, baselineCents: 454_500 });
+    expect(points.find(({ date }) => date === '2026-10-20')).toMatchObject({ cents: 640_000, baselineCents: 606_000 });
+  });
+
+  it('nello stesso giorno di un cambio di quote cambia solo il prezzo', async () => {
+    const id = await etfA();
+    await recordPrices('2026-10-01', [{ holdingId: id, priceMicros: 170_000_000 }], today);
+    expect(await db.holdingSnapshots.get(`${id}|2026-10-01`)).toMatchObject({ quantityMicros: 30_000_000, avgPriceMicros: 151_500_000, priceMicros: 170_000_000 });
   });
 
   it('annullando rimette il prezzo di prima, anche se aveva sostituito quello dello stesso giorno', async () => {
@@ -155,6 +164,81 @@ describe('prezzi', () => {
   });
 });
 
+describe('prezzi automatici', () => {
+  const row = (id: string, date: string) => db.holdingSnapshots.get(`${id}|${date}`);
+
+  it('un prezzo nuovo aggiunge una riga con il solo prezzo', async () => {
+    const id = await etfA();
+    expect(await recordQuotes([{ holdingId: id, date: '2026-10-29', priceMicros: 168_930_000 }], today)).toBe(1);
+    expect(await row(id, '2026-10-29')).toEqual({ id: `${id}|2026-10-29`, holdingId: id, date: '2026-10-29', priceMicros: 168_930_000 });
+  });
+
+  it('lo stesso prezzo non scrive niente', async () => {
+    const id = await etfA();
+    await recordQuotes([{ holdingId: id, date: '2026-10-29', priceMicros: 168_930_000 }], today);
+    expect(await recordQuotes([{ holdingId: id, date: '2026-10-29', priceMicros: 168_930_000 }], today)).toBe(0);
+    expect(await db.holdingSnapshots.count()).toBe(2);
+  });
+
+  it('nello stesso giorno aggiorna il prezzo e lascia quote e prezzo medio', async () => {
+    const id = await etfA();
+    await recordQuotes([{ holdingId: id, date: '2026-10-01', priceMicros: 170_000_000 }], today);
+    expect(await row(id, '2026-10-01')).toMatchObject({ quantityMicros: 30_000_000, avgPriceMicros: 151_500_000, priceMicros: 170_000_000 });
+    expect(await db.holdingSnapshots.count()).toBe(1);
+  });
+
+  it('un prezzo più vecchio dell’ultimo noto non aggiunge righe', async () => {
+    const id = await etfA();
+    expect(await recordQuotes([{ holdingId: id, date: '2026-09-15', priceMicros: 170_000_000 }], today)).toBe(0);
+    expect(await db.holdingSnapshots.count()).toBe(1);
+  });
+
+  it('una data di domani, per chi è in un altro fuso, diventa oggi', async () => {
+    const id = await etfA();
+    await recordQuotes([{ holdingId: id, date: '2026-10-31', priceMicros: 170_000_000 }], today);
+    expect(await row(id, today)).toMatchObject({ priceMicros: 170_000_000 });
+  });
+
+  it('ignora strumenti eliminati e prezzi sbagliati', async () => {
+    const id = await etfA();
+    const quotes = [
+      { holdingId: 'boh', date: today, priceMicros: 1 },
+      { holdingId: id, date: today, priceMicros: 0 },
+      { holdingId: id, date: today, priceMicros: 1.5 },
+    ];
+    expect(await recordQuotes(quotes, today)).toBe(0);
+    expect(await recordQuotes([], today)).toBe(0);
+  });
+
+  it('togliendo quote sbagliate si corregge anche la storia dei prezzi', async () => {
+    const id = await etfA();
+    const draft = { accountId: brokerId, instrument: 'ETF-A', isin: '' };
+    await updateHolding(id, draft, position({ date: '2026-10-10', quantityMicros: 300_000_000 }), today);
+    await recordQuotes([{ holdingId: id, date: '2026-10-20', priceMicros: 170_000_000 }], today);
+
+    await deleteSnapshot(`${id}|2026-10-10`);
+    const data = await readAllData();
+    expect(summarizeHoldings(data.holdings, data.holdingSnapshots, today)[0]).toMatchObject({ quantityMicros: 30_000_000, priceMicros: 170_000_000 });
+    expect(investmentSeries(data.holdings, data.holdingSnapshots, today).at(-1)).toMatchObject({ cents: 510_000 });
+  });
+
+  it('collega lo strumento e completa l’ISIN se manca', async () => {
+    const id = await createHolding({ accountId: brokerId, instrument: 'ETF-A', isin: '' }, position(), today);
+    await linkHolding(id, { source: 'FUND/1', isin: 'XX0000000001', name: 'Nome lungo' });
+    expect(await db.holdings.get(id)).toMatchObject({ instrument: 'ETF-A', isin: 'XX0000000001', quoteSource: 'FUND/1' });
+    await linkHolding(id, { source: 'FUND/2', isin: 'XX0000000002', name: 'Altro' });
+    expect(await db.holdings.get(id)).toMatchObject({ isin: 'XX0000000001', quoteSource: 'FUND/2' });
+    await expect(linkHolding('boh', { source: 'FUND/1', isin: '', name: '' })).resolves.toBeUndefined();
+  });
+
+  it('togliendo la fonte il prezzo torna a mano', async () => {
+    const id = await createHolding({ accountId: brokerId, instrument: 'ETF-A', isin: '', quoteSource: 'FUND/1' }, position(), today);
+    expect((await db.holdings.get(id))?.quoteSource).toBe('FUND/1');
+    await updateHolding(id, { accountId: brokerId, instrument: 'ETF-A', isin: '' }, null, today);
+    expect(await db.holdings.get(id)).not.toHaveProperty('quoteSource');
+  });
+});
+
 describe('storico', () => {
   it('toglie un aggiornamento sbagliato, e si può annullare', async () => {
     const id = await etfA();
@@ -169,6 +253,14 @@ describe('storico', () => {
   it('l’ultimo aggiornamento rimasto non si toglie', async () => {
     const id = await etfA();
     await expect(deleteSnapshot(`${id}|2026-10-01`)).rejects.toThrow(/unico/);
+    expect(await db.holdingSnapshots.count()).toBe(1);
+  });
+
+  it('anche con altri prezzi, l’ultimo con le quote resta', async () => {
+    const id = await etfA();
+    await recordPrices('2026-10-20', [{ holdingId: id, priceMicros: 170_000_000 }], today);
+    await expect(deleteSnapshot(`${id}|2026-10-01`)).rejects.toThrow(/unico/);
+    await deleteSnapshot(`${id}|2026-10-20`);
     expect(await db.holdingSnapshots.count()).toBe(1);
   });
 });
@@ -248,7 +340,19 @@ describe('backup', () => {
     expect(errorOf({ holdingSnapshots: [{ ...snapshot, date: 'ieri' }] })).toMatch(/data/);
     expect(errorOf({ holdingSnapshots: [{ ...snapshot, priceMicros: 1.5 }] })).toMatch(/quote o prezzi/);
     expect(errorOf({ holdingSnapshots: [{ ...snapshot, id: '' }] })).toMatch(/identificatore/);
+    expect(errorOf({ holdings: [{ ...holding, quoteSource: '../altro' }] })).toMatch(/fonte/);
+    expect(errorOf({ holdingSnapshots: [{ ...snapshot, avgPriceMicros: undefined }] })).toMatch(/quote o prezzi/);
+    expect(errorOf({ holdingSnapshots: [{ ...snapshot, quantityMicros: -1 }] })).toMatch(/quote o prezzi/);
     expect(id).toBeTruthy();
+  });
+
+  it('righe del solo prezzo e fonte dei prezzi tornano uguali', async () => {
+    const id = await createHolding({ accountId: brokerId, instrument: 'ETF-A', isin: '', quoteSource: 'FUND/1' }, position(), today);
+    await recordQuotes([{ holdingId: id, date: today, priceMicros: 170_000_000 }], today);
+    const data = await readAllData();
+    const result = parseBackup(serializeBackup(buildBackup(data)));
+    expect(result.ok && result.backup.data.holdings).toEqual(data.holdings);
+    expect(result.ok && result.backup.data.holdingSnapshots).toEqual(data.holdingSnapshots);
   });
 
   it('un backup della versione precedente si legge, senza strumenti', async () => {

@@ -55,6 +55,8 @@ class FinanzeDB extends Dexie {
       });
     // Gli aggiornamenti di quote e prezzi degli investimenti: finora non si potevano inserire.
     this.version(3).stores({ holdingSnapshots: 'id, holdingId, date' });
+    // Prezzi automatici: cambia il contenuto delle righe, non le tabelle.
+    this.version(4).stores({});
     this.on('populate', (transaction) => {
       void transaction.table('categories').bulkAdd([...DEFAULT_CATEGORIES]);
       void transaction.table('budgets').bulkAdd(defaultBudgets(new Set(DEFAULT_CATEGORIES.map(({ id }) => id))));

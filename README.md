@@ -2,7 +2,7 @@
 
 Web app per le finanze personali, installabile sulla Home dell'iPhone. Funziona offline.
 
-Questo repository contiene solo codice. I dati restano sul telefono, in IndexedDB: non esistono backend, account, analytics o API esterne, e una Content-Security-Policy blocca ogni connessione verso altri siti. Il backup è un file JSON che esporti tu.
+Questo repository contiene solo codice. I dati restano sul telefono, in IndexedDB: non esistono backend, account o analytics. L'unica connessione esterna serve a leggere i prezzi degli investimenti da onvista e riceve solo il codice dello strumento, mai quote o importi; una Content-Security-Policy blocca tutte le altre. Il backup è un file JSON che esporti tu.
 
 ## Sviluppo
 

@@ -6,15 +6,15 @@ import { defineConfig } from 'vitest/config';
 
 const THEME_COLOR = '#ffffff';
 
-// Blocca ogni connessione esterna: "nessuna API esterna" lo fa rispettare il browser,
-// anche alle librerie. Solo in build, perché il server di sviluppo usa script inline e websocket.
+// Blocca ogni connessione esterna tranne la fonte dei prezzi degli investimenti: lo fa rispettare
+// il browser, anche alle librerie. Solo in build, perché il server di sviluppo usa script inline e websocket.
 const CONTENT_SECURITY_POLICY = [
   "default-src 'none'",
   "script-src 'self'",
   "style-src 'self'",
   "img-src 'self' data: blob:",
   "font-src 'self'",
-  "connect-src 'self'",
+  "connect-src 'self' https://api.onvista.de",
   "manifest-src 'self'",
   "worker-src 'self'",
   "base-uri 'none'",

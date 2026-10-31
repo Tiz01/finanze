@@ -3,7 +3,7 @@ import { useSyncExternalStore } from 'react';
 // Routing a hash: GitHub Pages non gestisce le rotte di una single-page app.
 export const ROUTES = [
   'home',
-  'home/investimenti',
+  'investimenti',
   'movimenti',
   'report',
   'impostazioni',
@@ -17,7 +17,7 @@ export const ROUTES = [
 ] as const;
 export type Route = (typeof ROUTES)[number];
 
-export type Tab = 'home' | 'movimenti' | 'report' | 'impostazioni';
+export type Tab = 'home' | 'investimenti' | 'movimenti' | 'report' | 'impostazioni';
 
 export function tabOf(route: Route): Tab {
   return route.split('/')[0] as Tab;
