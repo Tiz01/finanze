@@ -87,7 +87,15 @@ body {
   color: var(--ink);
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
+}
+
+/* Niente ingrandimento con il doppio tocco, o digitando «77» sul tastierino la pagina si ingrandisce.
+   Va su ogni elemento: dentro una zona che scorre iOS riparte da capo e ignora la regola sui contenitori.
+   In un layer, così touch-pan-y sul grafico continua a vincere. */
+@layer base {
+  * {
+    touch-action: manipulation;
+  }
 }
 
 /* Su iOS i campi data hanno una larghezza minima propria e uscirebbero dal contenitore. */

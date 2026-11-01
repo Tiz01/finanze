@@ -88,20 +88,16 @@ function AccountForm({
         <Field label="Tipo">
           <SelectInput value={type} onChange={(value) => changeType(value as AccountType)} options={TYPE_OPTIONS} />
         </Field>
-        {type === 'investimento' ? (
-          <Field
-            label="Liquidità"
-            hint={
-              editsCash
-                ? 'I soldi non investiti che vedi nel broker: è la stessa cifra della scheda Investimenti.'
-                : 'I soldi non investiti che vedi nel broker alla data qui sotto.'
-            }
-          >
+        {editsCash ? (
+          <Field label="Liquidità" hint="I soldi non investiti che vedi nel broker: è la stessa cifra della scheda Investimenti.">
             <AmountField title="Liquidità" cents={initialCents} onChange={setInitialCents} allowNegative />
           </Field>
         ) : (
-          <Field label="Saldo iniziale" hint="Quello che vedi nell’app della banca alla data qui sotto.">
-            <AmountField title="Saldo iniziale" cents={initialCents} onChange={setInitialCents} allowNegative />
+          <Field
+            label={type === 'investimento' ? 'Liquidità' : 'Saldo iniziale'}
+            hint={type === 'investimento' ? 'I soldi non investiti che vedi nel broker alla data qui sotto.' : 'Quello che vedi nell’app della banca alla data qui sotto.'}
+          >
+            <AmountField title={type === 'investimento' ? 'Liquidità' : 'Saldo iniziale'} cents={initialCents} onChange={setInitialCents} allowNegative />
           </Field>
         )}
         {!editsCash && (
