@@ -423,7 +423,10 @@ function CashForm({ overview, today, onClose }: { overview: AccountOverview; tod
         <Button className="w-full" disabled={input === ''} onClick={() => void save()}>
           Salva
         </Button>
-        <p className="text-center text-xs text-muted">È il saldo del conto, lo stesso che vedi in Conti. Resta fuori dalla liquidità disponibile della Home.</p>
+        <p className="text-center text-xs text-muted">
+          È il saldo del conto, lo stesso che vedi in Conti.{' '}
+          {account.contaComeLiquidita ? 'Conta anche nella liquidità disponibile della Home.' : 'Resta fuori dalla liquidità disponibile della Home.'}
+        </p>
       </div>
     </Sheet>
   );
