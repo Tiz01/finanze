@@ -22,9 +22,6 @@ export interface Account {
   archived: boolean;
   contaComeLiquidita: boolean;
   createdAt: string;
-  /** Solo nei conti investimento: i soldi non investiti letti nel broker, e il giorno in cui sono stati scritti. */
-  cashCents?: number;
-  cashDate?: IsoDate;
 }
 
 export const TRANSACTION_TYPES = ['entrata', 'uscita', 'trasferimento', 'rettifica'] as const;

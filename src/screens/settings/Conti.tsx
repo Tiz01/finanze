@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { createAccount, deleteAccount, updateAccount } from '../../db/accounts';
 import { useData } from '../../db/DataProvider';
 import { ACCOUNT_TYPE_LABELS, defaultCountsAsLiquidity } from '../../domain/accounts';
-import { computeBalances } from '../../domain/balances';
+import { balanceFieldsFor, computeBalances } from '../../domain/balances';
 import { todayIso } from '../../domain/dates';
 import { formatCents } from '../../domain/money';
 import { ACCOUNT_TYPES, type Account, type AccountType } from '../../domain/types';
@@ -17,16 +17,21 @@ const TYPE_OPTIONS = ACCOUNT_TYPES.map((type) => ({ value: type, label: ACCOUNT_
 
 function AccountForm({
   account,
+  balanceCents,
   movementCount,
   onClose,
 }: {
   account: Account | null;
+  balanceCents: number;
   movementCount: number;
   onClose: () => void;
 }) {
+  const { transactions } = useData();
+  // In un conto investimento già creato si cambia il saldo di oggi: è la liquidità, la stessa della scheda Investimenti.
+  const editsCash = account?.type === 'investimento';
   const [name, setName] = useState(account?.name ?? '');
   const [type, setType] = useState<AccountType>(account?.type ?? 'corrente');
-  const [initialCents, setInitialCents] = useState(account?.initialBalanceCents ?? 0);
+  const [initialCents, setInitialCents] = useState(editsCash ? balanceCents : (account?.initialBalanceCents ?? 0));
   const [initialDate, setInitialDate] = useState(account?.initialBalanceDate ?? todayIso());
   const [liquidity, setLiquidity] = useState(account?.contaComeLiquidita ?? defaultCountsAsLiquidity('corrente'));
   const [liquidityChosen, setLiquidityChosen] = useState(account !== null);
@@ -38,13 +43,18 @@ function AccountForm({
     if (!liquidityChosen) setLiquidity(defaultCountsAsLiquidity(next));
   }
 
+  function balanceFields() {
+    if (!account || !editsCash) return { initialBalanceCents: initialCents, initialBalanceDate: initialDate };
+    if (initialCents === balanceCents) return { initialBalanceCents: account.initialBalanceCents, initialBalanceDate: account.initialBalanceDate };
+    return balanceFieldsFor(account, initialCents, transactions, todayIso());
+  }
+
   async function save() {
     const draft = {
       name,
       type,
       currency: account?.currency ?? 'EUR',
-      initialBalanceCents: initialCents,
-      initialBalanceDate: initialDate,
+      ...balanceFields(),
       archived,
       contaComeLiquidita: liquidity,
     };
@@ -78,18 +88,33 @@ function AccountForm({
         <Field label="Tipo">
           <SelectInput value={type} onChange={(value) => changeType(value as AccountType)} options={TYPE_OPTIONS} />
         </Field>
-        <Field label="Saldo iniziale" hint="Quello che vedi nell’app della banca alla data qui sotto.">
-          <AmountField title="Saldo iniziale" cents={initialCents} onChange={setInitialCents} allowNegative />
-        </Field>
-        <Field label="Data del saldo" hint="I movimenti contano nel saldo da questa data in poi.">
-          <TextInput
-            type="date"
-            value={initialDate}
-            onChange={(event) => {
-              if (event.target.value) setInitialDate(event.target.value);
-            }}
-          />
-        </Field>
+        {type === 'investimento' ? (
+          <Field
+            label="Liquidità"
+            hint={
+              editsCash
+                ? 'I soldi non investiti che vedi nel broker: è la stessa cifra della scheda Investimenti.'
+                : 'I soldi non investiti che vedi nel broker alla data qui sotto.'
+            }
+          >
+            <AmountField title="Liquidità" cents={initialCents} onChange={setInitialCents} allowNegative />
+          </Field>
+        ) : (
+          <Field label="Saldo iniziale" hint="Quello che vedi nell’app della banca alla data qui sotto.">
+            <AmountField title="Saldo iniziale" cents={initialCents} onChange={setInitialCents} allowNegative />
+          </Field>
+        )}
+        {!editsCash && (
+          <Field label="Data del saldo" hint="I movimenti contano nel saldo da questa data in poi.">
+            <TextInput
+              type="date"
+              value={initialDate}
+              onChange={(event) => {
+                if (event.target.value) setInitialDate(event.target.value);
+              }}
+            />
+          </Field>
+        )}
         <ToggleRow
           label="Conta come liquidità"
           hint="Entra nel totale dei soldi disponibili."
@@ -179,6 +204,7 @@ export function Conti() {
       {editing && (
         <AccountForm
           account={editing === 'new' ? null : editing}
+          balanceCents={editing === 'new' ? 0 : (balances.get(editing.id) ?? 0)}
           movementCount={editing === 'new' ? 0 : (movementCounts.get(editing.id) ?? 0)}
           onClose={() => setEditing(null)}
         />

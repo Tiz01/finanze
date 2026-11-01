@@ -31,10 +31,6 @@ function isMicros(value: number): boolean {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
-function isCents(value: number): boolean {
-  return Number.isSafeInteger(value) && value >= 0;
-}
-
 function checkPosition(position: PositionDraft, today: IsoDate): void {
   if (!isValidIsoDate(position.date)) throw new Error('Data non valida');
   if (position.date > today) throw new Error('La data non può essere futura');
@@ -180,17 +176,6 @@ export async function recordHistory(holdingId: string, points: PricePoint[], fro
     if (changes.length > 0) await db.holdingSnapshots.bulkPut(changes);
     const historyFrom = holding.historyFrom !== undefined && holding.historyFrom < from ? holding.historyFrom : from;
     if (holding.historyFrom !== historyFrom) await db.holdings.put({ ...holding, historyFrom });
-  });
-}
-
-/** I soldi non investiti di un conto, letti nel broker: valgono finché non se ne scrivono di nuovi. */
-export async function setAccountCash(accountId: string, cents: number, today: IsoDate): Promise<Undo> {
-  if (!isCents(cents)) throw new Error('Importo non valido');
-  return db.transaction('rw', db.accounts, async () => {
-    const account = await db.accounts.get(accountId);
-    if (!account) throw new Error('Il conto non esiste più');
-    await db.accounts.put({ ...account, cashCents: cents, cashDate: today });
-    return () => db.accounts.put(account).then(() => undefined);
   });
 }
 

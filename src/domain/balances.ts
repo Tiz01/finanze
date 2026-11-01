@@ -1,4 +1,4 @@
-import { addDays } from './dates';
+import { addDays, isValidIsoDate } from './dates';
 import type { Account, IsoDate, Transaction } from './types';
 
 /** Di quanto un movimento cambia i conti che tocca. */
@@ -44,6 +44,27 @@ export function computeBalances(
     }
   }
   return balances;
+}
+
+/**
+ * Saldo iniziale e data con cui il saldo di un conto risulta `cents` quel giorno.
+ * I movimenti di quello stesso giorno contano nel saldo: vanno tolti, o verrebbero contati due volte.
+ */
+export function balanceFieldsFor(
+  account: Account,
+  cents: number,
+  transactions: Transaction[],
+  date: IsoDate,
+): Pick<Account, 'initialBalanceCents' | 'initialBalanceDate'> {
+  const sameDay = computeBalances([{ ...account, initialBalanceCents: 0, initialBalanceDate: date }], transactions, date);
+  return { initialBalanceCents: cents - (sameDay.get(account.id) ?? 0), initialBalanceDate: date };
+}
+
+/** Per poche ore la liquidità di un conto investimento si è scritta in due campi a parte: ora è il saldo del conto. */
+export function mergeWrittenCash(account: Account & { cashCents?: unknown; cashDate?: unknown }, transactions: Transaction[]): Account {
+  const { cashCents, cashDate, ...rest } = account;
+  if (typeof cashCents !== 'number' || !isValidIsoDate(cashDate)) return rest;
+  return { ...rest, ...balanceFieldsFor(rest, cashCents, transactions, cashDate) };
 }
 
 /** La somma dei conti in uso che contano come liquidità. */

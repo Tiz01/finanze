@@ -382,27 +382,17 @@ describe('storico dei prezzi', () => {
 describe('investito e liquidità', () => {
   const rows = [snapshot('a', '2026-10-01', 10, 100, 120), snapshot('b', '2026-10-01', 5, 10, 10)];
   const summaries = summarizeHoldings([holding('a', 'uno'), holding('b', 'due')], rows, today);
-  const balances = new Map([['uno', 50_000], ['due', 7_000], ['tre', 9_000]]);
+  const balances = new Map([['uno', 27_714], ['due', 7_000], ['tre', 9_000]]);
 
-  it('divide ogni conto tra investito e liquidità scritta', () => {
-    const [uno] = accountOverviews([account('uno', { cashCents: 27_714, cashDate: today })], summaries, balances);
+  it('la liquidità è il saldo del conto, anche con degli strumenti', () => {
+    const [uno] = accountOverviews([account('uno')], summaries, balances);
     expect(uno).toMatchObject({ investedCents: 120_000, cashCents: 27_714, totalCents: 147_714 });
     expect(uno?.holdings.map(({ holding: { id } }) => id)).toEqual(['a']);
   });
 
-  it('la liquidità non è il saldo dei movimenti: con strumenti e senza indicazione, manca', () => {
-    const [uno] = accountOverviews([account('uno')], summaries, balances);
-    expect(uno).toMatchObject({ investedCents: 120_000, cashCents: null, totalCents: 120_000 });
-  });
-
-  it('senza strumenti i soldi registrati nel conto sono tutti liquidità', () => {
+  it('senza strumenti è tutto liquidità', () => {
     const [tre] = accountOverviews([account('tre')], summaries, balances);
     expect(tre).toMatchObject({ investedCents: 0, cashCents: 9_000, totalCents: 9_000 });
-  });
-
-  it('una liquidità scritta vince sui movimenti, anche se è zero', () => {
-    const [tre] = accountOverviews([account('tre', { cashCents: 0, cashDate: today })], summaries, balances);
-    expect(tre).toMatchObject({ cashCents: 0, totalCents: 0 });
   });
 
   it('lascia fuori i conti archiviati e quelli di altro tipo', () => {
@@ -410,24 +400,18 @@ describe('investito e liquidità', () => {
     expect(accountOverviews(accounts, summaries, balances).map(({ account: { id } }) => id)).toEqual(['uno']);
   });
 
-  it('somma tutti i conti e dice quanti non hanno ancora la liquidità', () => {
-    const overviews = accountOverviews(
-      [account('uno', { cashCents: 27_714, cashDate: today }), account('due'), account('tre', { cashCents: 1_000, cashDate: today })],
-      summaries,
-      balances,
-    );
-    const totals = overviewTotals(overviews);
-    expect(totals).toMatchObject({ investedCents: 125_000, cashCents: 28_714, totalCents: 153_714, missingCash: 1 });
-    expect(totals.investedShare).toBeCloseTo(125_000 / 153_714);
+  it('somma tutti i conti', () => {
+    const totals = overviewTotals(accountOverviews([account('uno'), account('due'), account('tre')], summaries, balances));
+    expect(totals).toMatchObject({ investedCents: 125_000, cashCents: 43_714, totalCents: 168_714 });
+    expect(totals.investedShare).toBeCloseTo(125_000 / 168_714);
   });
 
   it('senza niente da dividere non c’è una percentuale', () => {
-    expect(overviewTotals([])).toEqual({ investedCents: 0, cashCents: 0, totalCents: 0, missingCash: 0, investedShare: null });
+    expect(overviewTotals([])).toEqual({ investedCents: 0, cashCents: 0, totalCents: 0, investedShare: null });
   });
 
-  it('una liquidità negativa dai movimenti non falsa la percentuale', () => {
-    const overviews = accountOverviews([account('uno', { cashCents: 0, cashDate: today }), account('tre')], summaries, new Map([['tre', -5_000]]));
-    const totals = overviewTotals(overviews);
+  it('una liquidità negativa non falsa la percentuale', () => {
+    const totals = overviewTotals(accountOverviews([account('uno'), account('tre')], summaries, new Map([['uno', 0], ['tre', -5_000]])));
     expect(totals).toMatchObject({ investedCents: 120_000, cashCents: -5_000, totalCents: 115_000 });
     expect(totals.investedShare).toBe(1);
   });

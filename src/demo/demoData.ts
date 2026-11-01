@@ -55,7 +55,7 @@ export function buildDemoData(today: IsoDate, now: Date = new Date()): {
     makeAccount('demo-corrente', 'Conto Demo', 'corrente', 120000, start, true, createdAt(0)),
     makeAccount('demo-contanti', 'Contanti Demo', 'contanti', 8000, start, true, createdAt(1)),
     makeAccount('demo-deposito', 'Deposito Demo', 'deposito', 300000, start, false, createdAt(2)),
-    { ...makeAccount('demo-broker', 'Broker Demo', 'investimento', 50000, start, false, createdAt(3)), cashCents: 12340, cashDate: today },
+    makeAccount('demo-broker', 'Broker Demo', 'investimento', 50000, start, false, createdAt(3)),
   ];
 
   const drafts: (TransactionDraft & { id?: string })[] = [];

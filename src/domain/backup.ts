@@ -1,3 +1,4 @@
+import { mergeWrittenCash } from './balances';
 import { defaultBudgets } from './budgets';
 import { daysBetween, isValidIsoDate, toIsoDate } from './dates';
 import { isQuoteSource } from './quotes';
@@ -5,6 +6,7 @@ import { validateRule } from './recurring';
 import { mappingShapeProblem } from './statementMapping';
 import { compareNewestFirst, validateTransaction } from './transactions';
 import {
+  TRANSACTION_TYPES,
   ACCOUNT_TYPES,
   type Account,
   type Budget,
@@ -18,10 +20,11 @@ import {
   type Reconciliation,
   type Setting,
   type Transaction,
+  type TransactionType,
 } from './types';
 
 /** Stessa versione dello schema Dexie: va aumentata insieme a ogni migrazione. */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 const APP_ID = 'finanze';
 
@@ -88,6 +91,15 @@ const MIGRATIONS: Record<number, (data: Record<string, unknown>) => Record<strin
       ? categories.filter(isRecord).map((category) => String(category.id))
       : [];
     return { ...data, budgets: defaultBudgets(new Set(categoryIds)) };
+  },
+  // Nella versione 4 la liquidità di un conto investimento poteva stare in due campi a parte.
+  4(data) {
+    const { accounts, transactions } = data;
+    if (!Array.isArray(accounts)) return data;
+    const movements = (Array.isArray(transactions) ? transactions : []).filter(
+      (item): item is Transaction => isRecord(item) && TRANSACTION_TYPES.includes(item.type as TransactionType),
+    );
+    return { ...data, accounts: accounts.map((account: unknown) => (isRecord(account) ? mergeWrittenCash(account as unknown as Account, movements) : account)) };
   },
 };
 
@@ -156,11 +168,6 @@ function accountProblem(account: Account): string | null {
   if (!isValidIsoDate(account.initialBalanceDate)) return 'la data del saldo iniziale non è valida';
   if (typeof account.archived !== 'boolean' || typeof account.contaComeLiquidita !== 'boolean') {
     return 'i campi sì/no non sono validi';
-  }
-  const { cashCents, cashDate } = account;
-  if (cashCents !== undefined || cashDate !== undefined) {
-    const validCash = Number.isSafeInteger(cashCents) && (cashCents ?? -1) >= 0 && isValidIsoDate(cashDate);
-    if (!validCash) return 'la liquidità non è valida';
   }
   return null;
 }

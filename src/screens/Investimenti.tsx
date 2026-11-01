@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useData } from '../db/DataProvider';
-import { createHolding, deleteHolding, deleteSnapshot, recordPrices, setAccountCash, updateHolding, type PriceUpdate } from '../db/investments';
+import { setAccountBalance } from '../db/accounts';
+import { createHolding, deleteHolding, deleteSnapshot, recordPrices, updateHolding, type PriceUpdate } from '../db/investments';
 import { computeBalances } from '../domain/balances';
 import { daysBetween, formatFullDate, formatShortDate } from '../domain/dates';
 import {
@@ -22,7 +23,6 @@ import {
 } from '../domain/investments';
 import {
   applyKeypadKey,
-  centsToKeypadInput,
   formatCents,
   formatKeypadInput,
   formatRate,
@@ -31,7 +31,7 @@ import {
   keypadInputToCents,
 } from '../domain/money';
 import { isIsin, isSearchable, normalizeCode } from '../domain/quotes';
-import type { Account, IsoDate } from '../domain/types';
+import type { IsoDate } from '../domain/types';
 import { usePriceSyncState, useInstrumentLookup, type InstrumentLookup, type PriceSyncState } from '../quotes';
 import { routeHref } from '../router';
 import { Button, ButtonLink, DateChip, Field, ListGroup, SectionTitle, SelectChip, SelectInput, TextInput } from '../ui/controls';
@@ -390,13 +390,14 @@ function PricesForm({ summaries, today, onClose }: { summaries: HoldingSummary[]
   );
 }
 
-function CashForm({ account, today, onClose }: { account: Account; today: IsoDate; onClose: () => void }) {
-  const [input, setInput] = useState(account.cashCents === undefined ? '' : centsToKeypadInput(account.cashCents));
+function CashForm({ overview, today, onClose }: { overview: AccountOverview; today: IsoDate; onClose: () => void }) {
+  const { account, cashCents } = overview;
+  const [input, setInput] = useState('');
   const [error, setError] = useState('');
 
   async function save() {
     try {
-      notify('Liquidità aggiornata', await setAccountCash(account.id, keypadInputToCents(input), today));
+      notify('Liquidità aggiornata', await setAccountBalance(account.id, keypadInputToCents(input), today));
       onClose();
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : 'Non è stato possibile salvare');
@@ -405,7 +406,7 @@ function CashForm({ account, today, onClose }: { account: Account; today: IsoDat
 
   return (
     <Sheet title={`Liquidità di ${account.name}`} onClose={onClose}>
-      <p className="text-center text-sm text-muted">Scrivi i soldi non investiti che vedi nel broker.</p>
+      <p className="text-center text-sm text-muted">Scrivi i soldi non investiti che vedi nel broker. Ora sono {formatCents(cashCents)}.</p>
       <p className={`py-3 text-center text-4xl font-semibold ${input === '' ? 'opacity-40' : ''}`}>{formatKeypadInput(input)}&nbsp;€</p>
       <div className="space-y-3">
         <Keypad
@@ -422,7 +423,7 @@ function CashForm({ account, today, onClose }: { account: Account; today: IsoDat
         <Button className="w-full" disabled={input === ''} onClick={() => void save()}>
           Salva
         </Button>
-        <p className="text-center text-xs text-muted">Restano fuori dalla liquidità disponibile della Home.</p>
+        <p className="text-center text-xs text-muted">È il saldo del conto, lo stesso che vedi in Conti. Resta fuori dalla liquidità disponibile della Home.</p>
       </div>
     </Sheet>
   );
@@ -442,20 +443,14 @@ function OverviewValue({ swatch, label, value }: { swatch: string; label: string
 
 function CashRow({ overview, today, onPress }: { overview: AccountOverview; today: IsoDate; onPress: () => void }) {
   const { account, cashCents } = overview;
-  let detail = 'I soldi non investiti';
-  if (account.cashDate) detail = `Aggiornata ${formatShortDate(account.cashDate, today).toLowerCase()}`;
-  else if (cashCents !== null) detail = 'Dai movimenti del conto';
+  const updated = `Aggiornata ${formatShortDate(account.initialBalanceDate, today).toLowerCase()}`;
   return (
     <button type="button" onClick={onPress} className="flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left active:bg-bg">
       <span className="min-w-0 flex-1">
         <span className="block truncate">Liquidità</span>
-        <span className="block truncate text-xs text-muted">{detail}</span>
+        <span className="block truncate text-xs text-muted">{cashCents === account.initialBalanceCents ? updated : `${updated}, più i movimenti`}</span>
       </span>
-      {cashCents === null ? (
-        <span className="shrink-0 font-medium text-accent">Aggiungi</span>
-      ) : (
-        <span className="shrink-0 tabular-nums">{formatCents(cashCents)}</span>
-      )}
+      <span className="shrink-0 tabular-nums">{formatCents(cashCents)}</span>
     </button>
   );
 }
@@ -536,8 +531,7 @@ export function Investimenti() {
   const firstChartDate = series[0]?.date ?? today;
 
   const showOverview = summaries.length > 0 || overall.cashCents !== 0;
-  const noCashKnown = overall.missingCash === overviews.length;
-  const accountWithCashOpen = overviews.find(({ account }) => account.id === editingCash)?.account;
+  const cashOverview = overviews.find(({ account }) => account.id === editingCash);
 
   const hero = showOverview ? (
     <>
@@ -558,8 +552,7 @@ export function Investimenti() {
                   { label: 'Liquidità', cents: overall.cashCents, color: 'var(--series-3)' },
                 ]}
               >
-                {/* Finché nessun conto ha la liquidità, «100% investito» sarebbe un numero inventato. */}
-                {overall.investedShare !== null && !noCashKnown && (
+                {overall.investedShare !== null && (
                   <>
                     <span className="text-lg leading-tight font-bold">{formatRate(overall.investedShare)}</span>
                     <span className="text-[11px] leading-tight text-muted">investito</span>
@@ -568,18 +561,9 @@ export function Investimenti() {
               </DonutChart>
               <dl className="min-w-0 flex-1 space-y-2">
                 <OverviewValue swatch="bg-series-1" label="Investito" value={formatCents(overall.investedCents)} />
-                <OverviewValue
-                  swatch="bg-series-3"
-                  label="Liquidità"
-                  value={noCashKnown ? 'Da aggiungere' : formatCents(overall.cashCents)}
-                />
+                <OverviewValue swatch="bg-series-3" label="Liquidità" value={formatCents(overall.cashCents)} />
               </dl>
             </div>
-            {overall.missingCash > 0 && (
-              <p className="px-4 pb-3 text-xs text-muted">
-                {overall.missingCash === 1 ? 'Manca la liquidità di un conto' : `Manca la liquidità di ${overall.missingCash} conti`}: la aggiungi qui sotto.
-              </p>
-            )}
             {summaries.length > 0 && (
               <>
                 <div className="border-t border-line">
@@ -615,7 +599,7 @@ export function Investimenti() {
                 <span className="shrink-0 tabular-nums">{formatCents(totalCents)}</span>
               </div>
               <p className="text-xs text-muted tabular-nums">
-                Investito {formatCents(investedCents)} · Liquidità {cashCents === null ? 'da aggiungere' : formatCents(cashCents)}
+                Investito {formatCents(investedCents)} · Liquidità {formatCents(cashCents)}
               </p>
             </div>
             <ListGroup>
@@ -672,7 +656,7 @@ export function Investimenti() {
         />
       )}
       {updatingPrices && <PricesForm summaries={manual} today={today} onClose={() => setUpdatingPrices(false)} />}
-      {accountWithCashOpen && <CashForm key={accountWithCashOpen.id} account={accountWithCashOpen} today={today} onClose={() => setEditingCash(null)} />}
+      {cashOverview && <CashForm key={cashOverview.account.id} overview={cashOverview} today={today} onClose={() => setEditingCash(null)} />}
     </Screen>
   );
 }

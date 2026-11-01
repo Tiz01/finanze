@@ -3,9 +3,9 @@ import Dexie from 'dexie';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { buildBackup, parseBackup, serializeBackup } from '../domain/backup';
 import { computeBalances, liquidityCents } from '../domain/balances';
-import { investmentSeries, portfolioTotals, summarizeHoldings } from '../domain/investments';
+import { accountOverviews, investmentSeries, portfolioTotals, summarizeHoldings } from '../domain/investments';
 import { summarizePeriod } from '../domain/reports';
-import { createAccount, deleteAccount, updateAccount, type AccountDraft } from './accounts';
+import { createAccount, deleteAccount, setAccountBalance, updateAccount, type AccountDraft } from './accounts';
 import { clearAllData, loadDemoData, readAllData, replaceAllData } from './data';
 import { db } from './db';
 import {
@@ -16,7 +16,6 @@ import {
   recordHistory,
   recordPrices,
   recordQuotes,
-  setAccountCash,
   updateHolding,
   type PositionDraft,
 } from './investments';
@@ -251,65 +250,83 @@ describe('prezzi automatici', () => {
 });
 
 describe('liquidità dei conti', () => {
-  it('la scrive con la data di oggi, e si può annullare', async () => {
-    const undo = await setAccountCash(brokerId, 27_714, today);
-    expect(await db.accounts.get(brokerId)).toMatchObject({ cashCents: 27_714, cashDate: today });
+  const overviewOf = async () => {
+    const data = await readAllData();
+    const balances = computeBalances(data.accounts, data.transactions, today);
+    return accountOverviews(data.accounts, summarizeHoldings(data.holdings, data.holdingSnapshots, today), balances).find(({ account }) => account.id === brokerId);
+  };
+  const balance = async () => computeBalances(await db.accounts.toArray(), await db.transactions.toArray(), today).get(brokerId);
+
+  it('legge il saldo messo in Conti, anche con degli strumenti', async () => {
+    await updateAccount(brokerId, { ...brokerDraft, initialBalanceCents: 27_714, initialBalanceDate: '2026-10-01' });
+    await etfA();
+    expect(await overviewOf()).toMatchObject({ cashCents: 27_714, investedCents: 480_000, totalCents: 507_714 });
+  });
+
+  it('cambiata in Investimenti si vede uguale in Conti, e si può annullare', async () => {
+    await updateAccount(brokerId, { ...brokerDraft, initialBalanceCents: 27_714, initialBalanceDate: '2026-10-01' });
+    const undo = await setAccountBalance(brokerId, 15_050, today);
+    expect(await db.accounts.get(brokerId)).toMatchObject({ initialBalanceCents: 15_050, initialBalanceDate: today });
+    expect(await balance()).toBe(15_050);
+    expect(await overviewOf()).toMatchObject({ cashCents: 15_050 });
     await undo();
-    const account = await db.accounts.get(brokerId);
-    expect(account).not.toHaveProperty('cashCents');
-    expect(account).not.toHaveProperty('cashDate');
+    expect(await db.accounts.get(brokerId)).toMatchObject({ initialBalanceCents: 27_714, initialBalanceDate: '2026-10-01' });
   });
 
-  it('annullando una correzione torna quella di prima', async () => {
-    await setAccountCash(brokerId, 100, '2026-10-01');
-    const undo = await setAccountCash(brokerId, 200, today);
-    await undo();
-    expect(await db.accounts.get(brokerId)).toMatchObject({ cashCents: 100, cashDate: '2026-10-01' });
+  it('cambiata in Conti si vede uguale in Investimenti', async () => {
+    await setAccountBalance(brokerId, 15_050, today);
+    await updateAccount(brokerId, { ...brokerDraft, initialBalanceCents: 9_900, initialBalanceDate: today });
+    expect(await overviewOf()).toMatchObject({ cashCents: 9_900 });
   });
 
-  it('accetta zero, rifiuta il resto', async () => {
-    await setAccountCash(brokerId, 0, today);
-    expect((await db.accounts.get(brokerId))?.cashCents).toBe(0);
-    await expect(setAccountCash(brokerId, -1, today)).rejects.toThrow(/non valido/);
-    await expect(setAccountCash(brokerId, 1.5, today)).rejects.toThrow(/non valido/);
-    await expect(setAccountCash('boh', 1, today)).rejects.toThrow(/non esiste/);
-  });
-
-  it('modificando il conto non si perde', async () => {
-    await setAccountCash(brokerId, 27_714, today);
-    await updateAccount(brokerId, { ...brokerDraft, name: 'Il mio broker' });
-    expect(await db.accounts.get(brokerId)).toMatchObject({ name: 'Il mio broker', cashCents: 27_714, cashDate: today });
-  });
-
-  it('non tocca liquidità disponibile, risparmio e movimenti', async () => {
+  it('i movimenti vecchi sono compresi, quelli nuovi si sommano', async () => {
     const correnteId = await createAccount({ ...brokerDraft, name: 'Corrente', type: 'corrente', initialBalanceCents: 100_000, contaComeLiquidita: true });
+    await addTransaction({ date: '2026-10-07', amountCents: 10_000, type: 'trasferimento', accountId: correnteId, toAccountId: brokerId });
+    expect(await balance()).toBe(10_000);
+    await setAccountBalance(brokerId, 2_500, '2026-10-20');
+    expect(await balance()).toBe(2_500);
+    await addTransaction({ date: '2026-10-25', amountCents: 10_000, type: 'trasferimento', accountId: correnteId, toAccountId: brokerId });
+    expect(await balance()).toBe(12_500);
+    expect(await overviewOf()).toMatchObject({ cashCents: 12_500 });
+  });
+
+  it('un movimento dello stesso giorno non si conta due volte', async () => {
+    const correnteId = await createAccount({ ...brokerDraft, name: 'Corrente', type: 'corrente', initialBalanceCents: 100_000, contaComeLiquidita: true });
+    await addTransaction({ date: today, amountCents: 10_000, type: 'trasferimento', accountId: correnteId, toAccountId: brokerId });
+    await setAccountBalance(brokerId, 15_050, today);
+    expect(await balance()).toBe(15_050);
+    expect((await db.accounts.get(brokerId))?.initialBalanceCents).toBe(5_050);
+  });
+
+  it('non tocca liquidità disponibile, risparmio, investito e movimenti', async () => {
+    const correnteId = await createAccount({ ...brokerDraft, name: 'Corrente', type: 'corrente', initialBalanceCents: 100_000, contaComeLiquidita: true });
+    await addTransaction({ date: '2026-10-07', amountCents: 10_000, type: 'trasferimento', accountId: correnteId, toAccountId: brokerId });
     const before = await readAllData();
-    await setAccountCash(brokerId, 27_714, today);
+    await setAccountBalance(brokerId, 27_714, today);
     const after = await readAllData();
     const liquidity = (data: typeof after) => liquidityCents(data.accounts, computeBalances(data.accounts, data.transactions, today));
-    expect(liquidity(after)).toBe(100_000);
     expect(liquidity(after)).toBe(liquidity(before));
-    expect(computeBalances(after.accounts, after.transactions, today).get(brokerId)).toBe(0);
-    expect(summarizePeriod(after, '2026-10-01', today).savingsCents).toBe(summarizePeriod(before, '2026-10-01', today).savingsCents);
-    expect(correnteId).toBeTruthy();
+    expect(after.transactions).toEqual(before.transactions);
+    expect(summarizePeriod(after, '2026-10-01', today)).toEqual(summarizePeriod(before, '2026-10-01', today));
   });
 
-  it('nel backup torna uguale, e una rovinata si rifiuta', async () => {
-    await setAccountCash(brokerId, 27_714, today);
-    const data = await readAllData();
-    const result = parseBackup(serializeBackup(buildBackup(data)));
-    expect(result.ok && result.backup.data.accounts).toEqual(data.accounts);
+  it('rifiuta importi non validi e conti che non esistono', async () => {
+    await expect(setAccountBalance(brokerId, 1.5, today)).rejects.toThrow(/non valido/);
+    await expect(setAccountBalance('boh', 1, today)).rejects.toThrow(/non esiste/);
+  });
 
-    const account = data.accounts[0]!;
-    const errorOf = (fields: object) => {
-      const parsed = parseBackup(serializeBackup(buildBackup({ ...data, accounts: [{ ...account, ...fields }] })));
-      return parsed.ok ? '' : parsed.error;
-    };
-    expect(errorOf({ cashCents: 1.5 })).toMatch(/liquidità/);
-    expect(errorOf({ cashCents: -1 })).toMatch(/liquidità/);
-    expect(errorOf({ cashDate: 'ieri' })).toMatch(/liquidità/);
-    expect(errorOf({ cashDate: undefined })).toMatch(/liquidità/);
-    expect(errorOf({ cashCents: undefined })).toMatch(/liquidità/);
+  it('un backup della versione con la liquidità a parte la porta nel saldo', async () => {
+    const data = await readAllData();
+    const file = JSON.parse(serializeBackup(buildBackup(data))) as { schemaVersion: number; data: { accounts: Record<string, unknown>[] } };
+    file.schemaVersion = 4;
+    file.data.accounts = file.data.accounts.map((account) => ({ ...account, cashCents: 27_714, cashDate: '2026-10-20' }));
+    const result = parseBackup(JSON.stringify(file));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const [account] = result.backup.data.accounts;
+    expect(account).toMatchObject({ initialBalanceCents: 27_714, initialBalanceDate: '2026-10-20' });
+    expect(account).not.toHaveProperty('cashCents');
+    expect(account).not.toHaveProperty('cashDate');
   });
 });
 
@@ -530,9 +547,48 @@ describe('dati demo', () => {
     expect(data.holdings.every(({ instrument }) => instrument.includes('(demo)'))).toBe(true);
     const totals = portfolioTotals(summarizeHoldings(data.holdings, data.holdingSnapshots, today));
     expect(totals.valueCents).toBeGreaterThan(0);
-    expect(data.accounts.find(({ type }) => type === 'investimento')).toMatchObject({ cashCents: 12_340, cashDate: today });
     const result = parseBackup(serializeBackup(buildBackup(data)));
     expect(result.ok).toBe(true);
+  });
+});
+
+describe('aggiornamento dalla versione con la liquidità a parte', () => {
+  const stores = {
+    accounts: 'id',
+    transactions: 'id, date, type, accountId, toAccountId, categoryId, recurringId, importId, reimbursesId, *tags',
+    categories: 'id, kind',
+    budgets: 'id',
+    recurring: 'id, nextDue',
+    reconciliations: 'id, accountId, date',
+    importProfiles: 'id',
+    importRules: 'id',
+    holdings: 'id, accountId, isin',
+    holdingSnapshots: 'id, holdingId, date',
+    settings: 'key',
+  };
+
+  it('la porta nel saldo, senza contare due volte i movimenti di quel giorno', async () => {
+    await db.delete();
+    db.close();
+    const old = new Dexie('finanze');
+    old.version(4).stores(stores);
+    await old.open();
+    const account = { ...brokerDraft, createdAt: '2026-01-01T00:00:00.000Z' };
+    await old.table('accounts').bulkAdd([
+      { ...account, id: 'scritta', initialBalanceCents: 500, cashCents: 27_714, cashDate: '2026-10-20' },
+      { ...account, id: 'senza', initialBalanceCents: 900 },
+    ]);
+    await old.table('transactions').add({ id: 't', date: '2026-10-20', amountCents: 1_000, type: 'trasferimento', accountId: 'senza', toAccountId: 'scritta', createdAt: '2026-10-20T10:00:00.000Z' });
+    old.close();
+
+    await db.open();
+    const written = await db.accounts.get('scritta');
+    expect(written).toMatchObject({ initialBalanceCents: 26_714, initialBalanceDate: '2026-10-20' });
+    expect(written).not.toHaveProperty('cashCents');
+    expect(written).not.toHaveProperty('cashDate');
+    expect(await db.accounts.get('senza')).toMatchObject({ initialBalanceCents: 900, initialBalanceDate: '2026-01-01' });
+    const balances = computeBalances(await db.accounts.toArray(), await db.transactions.toArray(), today);
+    expect(balances.get('scritta')).toBe(27_714);
   });
 });
 

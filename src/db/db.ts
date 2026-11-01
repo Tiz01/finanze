@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie';
+import { mergeWrittenCash } from '../domain/balances';
 import { defaultBudgets } from '../domain/budgets';
 import { DEFAULT_CATEGORIES } from '../domain/categories';
 import type {
@@ -57,6 +58,14 @@ class FinanzeDB extends Dexie {
     this.version(3).stores({ holdingSnapshots: 'id, holdingId, date' });
     // Prezzi automatici: cambia il contenuto delle righe, non le tabelle.
     this.version(4).stores({});
+    // La liquidità di un conto investimento torna a essere il suo saldo.
+    this.version(5)
+      .stores({})
+      .upgrade(async (transaction) => {
+        const movements = await transaction.table<Transaction>('transactions').toArray();
+        const accounts = await transaction.table<Account>('accounts').toArray();
+        await transaction.table<Account>('accounts').bulkPut(accounts.map((account) => mergeWrittenCash(account, movements)));
+      });
     this.on('populate', (transaction) => {
       void transaction.table('categories').bulkAdd([...DEFAULT_CATEGORIES]);
       void transaction.table('budgets').bulkAdd(defaultBudgets(new Set(DEFAULT_CATEGORIES.map(({ id }) => id))));

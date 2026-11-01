@@ -177,8 +177,8 @@ export interface AccountOverview {
   account: Account;
   holdings: HoldingSummary[];
   investedCents: number;
-  /** Null se il conto ha degli strumenti ma la liquidità non è ancora stata indicata. */
-  cashCents: number | null;
+  /** I soldi non investiti: sono il saldo del conto, lo stesso che si vede in Conti. */
+  cashCents: number;
   totalCents: number;
 }
 
@@ -193,9 +193,8 @@ export function accountOverviews(
     .map((account) => {
       const holdings = summaries.filter(({ holding }) => holding.accountId === account.id);
       const investedCents = portfolioTotals(holdings).valueCents;
-      // Senza strumenti, i soldi registrati nel conto sono tutti non investiti.
-      const cashCents = account.cashCents ?? (holdings.length === 0 ? (balances.get(account.id) ?? 0) : null);
-      return { account, holdings, investedCents, cashCents, totalCents: investedCents + (cashCents ?? 0) };
+      const cashCents = balances.get(account.id) ?? 0;
+      return { account, holdings, investedCents, cashCents, totalCents: investedCents + cashCents };
     });
 }
 
@@ -203,8 +202,6 @@ export interface OverviewTotals {
   investedCents: number;
   cashCents: number;
   totalCents: number;
-  /** Quanti conti non hanno ancora la liquidità indicata: il totale non la comprende. */
-  missingCash: number;
   /** La parte investita del totale, da 0 a 1. Null se non c'è niente da dividere. */
   investedShare: number | null;
 }
@@ -212,18 +209,15 @@ export interface OverviewTotals {
 export function overviewTotals(overviews: AccountOverview[]): OverviewTotals {
   let investedCents = 0;
   let cashCents = 0;
-  let missingCash = 0;
   for (const overview of overviews) {
     investedCents += overview.investedCents;
-    cashCents += overview.cashCents ?? 0;
-    if (overview.cashCents === null) missingCash += 1;
+    cashCents += overview.cashCents;
   }
   const parts = investedCents + Math.max(cashCents, 0);
   return {
     investedCents,
     cashCents,
     totalCents: investedCents + cashCents,
-    missingCash,
     investedShare: parts > 0 ? investedCents / parts : null,
   };
 }

@@ -1,6 +1,8 @@
+import { balanceFieldsFor } from '../domain/balances';
 import { isValidIsoDate } from '../domain/dates';
-import type { Account } from '../domain/types';
+import type { Account, IsoDate } from '../domain/types';
 import { db } from './db';
+import type { Undo } from './transactions';
 
 export type AccountDraft = Omit<Account, 'id' | 'createdAt'>;
 
@@ -26,8 +28,19 @@ export async function updateAccount(id: string, draft: AccountDraft): Promise<vo
     if (prepared.type !== 'investimento' && (await db.holdings.where('accountId').equals(id).count()) > 0) {
       throw new Error('Il conto ha degli strumenti: per cambiare tipo togli prima quelli');
     }
-    // Quello che il modulo non conosce, come la liquidità di un conto investimento, resta com'è.
-    await db.accounts.put({ ...previous, ...prepared, id, createdAt: previous.createdAt });
+    await db.accounts.put({ ...prepared, id, createdAt: previous.createdAt });
+  });
+}
+
+/** Il saldo di oggi di un conto: da qui in poi contano solo i movimenti nuovi. */
+export async function setAccountBalance(id: string, cents: number, today: IsoDate): Promise<Undo> {
+  if (!Number.isSafeInteger(cents)) throw new Error('Importo non valido');
+  return db.transaction('rw', db.accounts, db.transactions, async () => {
+    const account = await db.accounts.get(id);
+    if (!account) throw new Error('Il conto non esiste più');
+    const movements = await db.transactions.where('accountId').equals(id).or('toAccountId').equals(id).toArray();
+    await db.accounts.put({ ...account, ...balanceFieldsFor(account, cents, movements, today) });
+    return () => db.accounts.put(account).then(() => undefined);
   });
 }
 
