@@ -536,6 +536,7 @@ export function Investimenti() {
   const firstChartDate = series[0]?.date ?? today;
 
   const showOverview = summaries.length > 0 || overall.cashCents !== 0;
+  const noCashKnown = overall.missingCash === overviews.length;
   const accountWithCashOpen = overviews.find(({ account }) => account.id === editingCash)?.account;
 
   const hero = showOverview ? (
@@ -557,7 +558,8 @@ export function Investimenti() {
                   { label: 'Liquidità', cents: overall.cashCents, color: 'var(--series-3)' },
                 ]}
               >
-                {overall.investedShare !== null && (
+                {/* Finché nessun conto ha la liquidità, «100% investito» sarebbe un numero inventato. */}
+                {overall.investedShare !== null && !noCashKnown && (
                   <>
                     <span className="text-lg leading-tight font-bold">{formatRate(overall.investedShare)}</span>
                     <span className="text-[11px] leading-tight text-muted">investito</span>
@@ -569,7 +571,7 @@ export function Investimenti() {
                 <OverviewValue
                   swatch="bg-series-3"
                   label="Liquidità"
-                  value={overall.missingCash === overviews.length ? 'Da aggiungere' : formatCents(overall.cashCents)}
+                  value={noCashKnown ? 'Da aggiungere' : formatCents(overall.cashCents)}
                 />
               </dl>
             </div>
