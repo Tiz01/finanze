@@ -26,7 +26,8 @@ export async function updateAccount(id: string, draft: AccountDraft): Promise<vo
     if (prepared.type !== 'investimento' && (await db.holdings.where('accountId').equals(id).count()) > 0) {
       throw new Error('Il conto ha degli strumenti: per cambiare tipo togli prima quelli');
     }
-    await db.accounts.put({ ...prepared, id, createdAt: previous.createdAt });
+    // Quello che il modulo non conosce, come la liquidità di un conto investimento, resta com'è.
+    await db.accounts.put({ ...previous, ...prepared, id, createdAt: previous.createdAt });
   });
 }
 

@@ -173,6 +173,61 @@ export function portfolioTotals(summaries: HoldingSummary[]): PortfolioTotals {
   return { valueCents, costCents, gainCents, gainRate: rate(gainCents, costCents), oldestPriceDate };
 }
 
+export interface AccountOverview {
+  account: Account;
+  holdings: HoldingSummary[];
+  investedCents: number;
+  /** Null se il conto ha degli strumenti ma la liquidità non è ancora stata indicata. */
+  cashCents: number | null;
+  totalCents: number;
+}
+
+/** Ogni conto investimento diviso tra soldi investiti e soldi non investiti. */
+export function accountOverviews(
+  accounts: Account[],
+  summaries: HoldingSummary[],
+  balances: Map<string, number>,
+): AccountOverview[] {
+  return accounts
+    .filter(({ archived, type }) => type === 'investimento' && !archived)
+    .map((account) => {
+      const holdings = summaries.filter(({ holding }) => holding.accountId === account.id);
+      const investedCents = portfolioTotals(holdings).valueCents;
+      // Senza strumenti, i soldi registrati nel conto sono tutti non investiti.
+      const cashCents = account.cashCents ?? (holdings.length === 0 ? (balances.get(account.id) ?? 0) : null);
+      return { account, holdings, investedCents, cashCents, totalCents: investedCents + (cashCents ?? 0) };
+    });
+}
+
+export interface OverviewTotals {
+  investedCents: number;
+  cashCents: number;
+  totalCents: number;
+  /** Quanti conti non hanno ancora la liquidità indicata: il totale non la comprende. */
+  missingCash: number;
+  /** La parte investita del totale, da 0 a 1. Null se non c'è niente da dividere. */
+  investedShare: number | null;
+}
+
+export function overviewTotals(overviews: AccountOverview[]): OverviewTotals {
+  let investedCents = 0;
+  let cashCents = 0;
+  let missingCash = 0;
+  for (const overview of overviews) {
+    investedCents += overview.investedCents;
+    cashCents += overview.cashCents ?? 0;
+    if (overview.cashCents === null) missingCash += 1;
+  }
+  const parts = investedCents + Math.max(cashCents, 0);
+  return {
+    investedCents,
+    cashCents,
+    totalCents: investedCents + cashCents,
+    missingCash,
+    investedShare: parts > 0 ? investedCents / parts : null,
+  };
+}
+
 /** Gli strumenti dei conti investimento in uso: quelli dei conti archiviati restano da parte. */
 export function activeHoldings(holdings: Holding[], accounts: Account[]): Holding[] {
   const active = new Set(accounts.filter(({ archived, type }) => type === 'investimento' && !archived).map(({ id }) => id));

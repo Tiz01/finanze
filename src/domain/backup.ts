@@ -157,6 +157,11 @@ function accountProblem(account: Account): string | null {
   if (typeof account.archived !== 'boolean' || typeof account.contaComeLiquidita !== 'boolean') {
     return 'i campi sì/no non sono validi';
   }
+  const { cashCents, cashDate } = account;
+  if (cashCents !== undefined || cashDate !== undefined) {
+    const validCash = Number.isSafeInteger(cashCents) && (cashCents ?? -1) >= 0 && isValidIsoDate(cashDate);
+    if (!validCash) return 'la liquidità non è valida';
+  }
   return null;
 }
 

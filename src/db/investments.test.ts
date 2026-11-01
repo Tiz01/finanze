@@ -16,6 +16,7 @@ import {
   recordHistory,
   recordPrices,
   recordQuotes,
+  setAccountCash,
   updateHolding,
   type PositionDraft,
 } from './investments';
@@ -249,6 +250,69 @@ describe('prezzi automatici', () => {
   });
 });
 
+describe('liquidità dei conti', () => {
+  it('la scrive con la data di oggi, e si può annullare', async () => {
+    const undo = await setAccountCash(brokerId, 27_714, today);
+    expect(await db.accounts.get(brokerId)).toMatchObject({ cashCents: 27_714, cashDate: today });
+    await undo();
+    const account = await db.accounts.get(brokerId);
+    expect(account).not.toHaveProperty('cashCents');
+    expect(account).not.toHaveProperty('cashDate');
+  });
+
+  it('annullando una correzione torna quella di prima', async () => {
+    await setAccountCash(brokerId, 100, '2026-10-01');
+    const undo = await setAccountCash(brokerId, 200, today);
+    await undo();
+    expect(await db.accounts.get(brokerId)).toMatchObject({ cashCents: 100, cashDate: '2026-10-01' });
+  });
+
+  it('accetta zero, rifiuta il resto', async () => {
+    await setAccountCash(brokerId, 0, today);
+    expect((await db.accounts.get(brokerId))?.cashCents).toBe(0);
+    await expect(setAccountCash(brokerId, -1, today)).rejects.toThrow(/non valido/);
+    await expect(setAccountCash(brokerId, 1.5, today)).rejects.toThrow(/non valido/);
+    await expect(setAccountCash('boh', 1, today)).rejects.toThrow(/non esiste/);
+  });
+
+  it('modificando il conto non si perde', async () => {
+    await setAccountCash(brokerId, 27_714, today);
+    await updateAccount(brokerId, { ...brokerDraft, name: 'Il mio broker' });
+    expect(await db.accounts.get(brokerId)).toMatchObject({ name: 'Il mio broker', cashCents: 27_714, cashDate: today });
+  });
+
+  it('non tocca liquidità disponibile, risparmio e movimenti', async () => {
+    const correnteId = await createAccount({ ...brokerDraft, name: 'Corrente', type: 'corrente', initialBalanceCents: 100_000, contaComeLiquidita: true });
+    const before = await readAllData();
+    await setAccountCash(brokerId, 27_714, today);
+    const after = await readAllData();
+    const liquidity = (data: typeof after) => liquidityCents(data.accounts, computeBalances(data.accounts, data.transactions, today));
+    expect(liquidity(after)).toBe(100_000);
+    expect(liquidity(after)).toBe(liquidity(before));
+    expect(computeBalances(after.accounts, after.transactions, today).get(brokerId)).toBe(0);
+    expect(summarizePeriod(after, '2026-10-01', today).savingsCents).toBe(summarizePeriod(before, '2026-10-01', today).savingsCents);
+    expect(correnteId).toBeTruthy();
+  });
+
+  it('nel backup torna uguale, e una rovinata si rifiuta', async () => {
+    await setAccountCash(brokerId, 27_714, today);
+    const data = await readAllData();
+    const result = parseBackup(serializeBackup(buildBackup(data)));
+    expect(result.ok && result.backup.data.accounts).toEqual(data.accounts);
+
+    const account = data.accounts[0]!;
+    const errorOf = (fields: object) => {
+      const parsed = parseBackup(serializeBackup(buildBackup({ ...data, accounts: [{ ...account, ...fields }] })));
+      return parsed.ok ? '' : parsed.error;
+    };
+    expect(errorOf({ cashCents: 1.5 })).toMatch(/liquidità/);
+    expect(errorOf({ cashCents: -1 })).toMatch(/liquidità/);
+    expect(errorOf({ cashDate: 'ieri' })).toMatch(/liquidità/);
+    expect(errorOf({ cashDate: undefined })).toMatch(/liquidità/);
+    expect(errorOf({ cashCents: undefined })).toMatch(/liquidità/);
+  });
+});
+
 describe('chiusure passate', () => {
   const linked = () => createHolding({ accountId: brokerId, instrument: 'ETF-A', isin: '', quoteSource: 'FUND/1' }, position(), today);
   const closes = [
@@ -466,6 +530,7 @@ describe('dati demo', () => {
     expect(data.holdings.every(({ instrument }) => instrument.includes('(demo)'))).toBe(true);
     const totals = portfolioTotals(summarizeHoldings(data.holdings, data.holdingSnapshots, today));
     expect(totals.valueCents).toBeGreaterThan(0);
+    expect(data.accounts.find(({ type }) => type === 'investimento')).toMatchObject({ cashCents: 12_340, cashDate: today });
     const result = parseBackup(serializeBackup(buildBackup(data)));
     expect(result.ok).toBe(true);
   });

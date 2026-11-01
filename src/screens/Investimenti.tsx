@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react';
 import { useData } from '../db/DataProvider';
-import { createHolding, deleteHolding, deleteSnapshot, recordPrices, updateHolding, type PriceUpdate } from '../db/investments';
+import { createHolding, deleteHolding, deleteSnapshot, recordPrices, setAccountCash, updateHolding, type PriceUpdate } from '../db/investments';
 import { computeBalances } from '../domain/balances';
 import { daysBetween, formatFullDate, formatShortDate } from '../domain/dates';
 import {
+  accountOverviews,
   activeHoldings,
   formatMicros,
   hasPosition,
   investmentSeries,
+  overviewTotals,
   parseMicros,
   portfolioTotals,
   positionValueCents,
@@ -15,16 +17,27 @@ import {
   snapshotAt,
   snapshotsByHolding,
   summarizeHoldings,
+  type AccountOverview,
   type HoldingSummary,
 } from '../domain/investments';
-import { formatCents, formatSignedCents, formatSignedRate } from '../domain/money';
+import {
+  applyKeypadKey,
+  centsToKeypadInput,
+  formatCents,
+  formatKeypadInput,
+  formatRate,
+  formatSignedCents,
+  formatSignedRate,
+  keypadInputToCents,
+} from '../domain/money';
 import { isIsin, isSearchable, normalizeCode } from '../domain/quotes';
-import type { IsoDate } from '../domain/types';
+import type { Account, IsoDate } from '../domain/types';
 import { usePriceSyncState, useInstrumentLookup, type InstrumentLookup, type PriceSyncState } from '../quotes';
 import { routeHref } from '../router';
 import { Button, ButtonLink, DateChip, Field, ListGroup, SectionTitle, SelectChip, SelectInput, TextInput } from '../ui/controls';
+import { DonutChart } from '../ui/DonutChart';
 import { notify, notifyError } from '../ui/feedback';
-import { openReconcile } from '../ui/reconcileStore';
+import { Keypad } from '../ui/Keypad';
 import { Screen } from '../ui/Screen';
 import { Sheet } from '../ui/Sheet';
 import { StatGrid, StatTile } from '../ui/stats';
@@ -377,6 +390,76 @@ function PricesForm({ summaries, today, onClose }: { summaries: HoldingSummary[]
   );
 }
 
+function CashForm({ account, today, onClose }: { account: Account; today: IsoDate; onClose: () => void }) {
+  const [input, setInput] = useState(account.cashCents === undefined ? '' : centsToKeypadInput(account.cashCents));
+  const [error, setError] = useState('');
+
+  async function save() {
+    try {
+      notify('Liquidità aggiornata', await setAccountCash(account.id, keypadInputToCents(input), today));
+      onClose();
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : 'Non è stato possibile salvare');
+    }
+  }
+
+  return (
+    <Sheet title={`Liquidità di ${account.name}`} onClose={onClose}>
+      <p className="text-center text-sm text-muted">Scrivi i soldi non investiti che vedi nel broker.</p>
+      <p className={`py-3 text-center text-4xl font-semibold ${input === '' ? 'opacity-40' : ''}`}>{formatKeypadInput(input)}&nbsp;€</p>
+      <div className="space-y-3">
+        <Keypad
+          onKey={(key) => {
+            setError('');
+            setInput((current) => applyKeypadKey(current, key));
+          }}
+        />
+        {error && (
+          <p role="alert" className="text-center text-sm text-danger">
+            {error}
+          </p>
+        )}
+        <Button className="w-full" disabled={input === ''} onClick={() => void save()}>
+          Salva
+        </Button>
+        <p className="text-center text-xs text-muted">Restano fuori dalla liquidità disponibile della Home.</p>
+      </div>
+    </Sheet>
+  );
+}
+
+function OverviewValue({ swatch, label, value }: { swatch: string; label: string; value: string }) {
+  return (
+    <div>
+      <dt className="flex items-center gap-1.5 text-xs text-muted">
+        <span className={`size-2.5 shrink-0 rounded-[2px] ${swatch}`} aria-hidden="true" />
+        {label}
+      </dt>
+      <dd className="text-lg font-semibold">{value}</dd>
+    </div>
+  );
+}
+
+function CashRow({ overview, today, onPress }: { overview: AccountOverview; today: IsoDate; onPress: () => void }) {
+  const { account, cashCents } = overview;
+  let detail = 'I soldi non investiti';
+  if (account.cashDate) detail = `Aggiornata ${formatShortDate(account.cashDate, today).toLowerCase()}`;
+  else if (cashCents !== null) detail = 'Dai movimenti del conto';
+  return (
+    <button type="button" onClick={onPress} className="flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left active:bg-bg">
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">Liquidità</span>
+        <span className="block truncate text-xs text-muted">{detail}</span>
+      </span>
+      {cashCents === null ? (
+        <span className="shrink-0 font-medium text-accent">Aggiungi</span>
+      ) : (
+        <span className="shrink-0 tabular-nums">{formatCents(cashCents)}</span>
+      )}
+    </button>
+  );
+}
+
 function PriceNote({ summaries, syncState, today }: { summaries: HoldingSummary[]; syncState: PriceSyncState; today: IsoDate }) {
   const automatic = summaries.filter(({ holding }) => holding.quoteSource);
   const manualCount = summaries.length - automatic.length;
@@ -419,13 +502,15 @@ export function Investimenti() {
   // `new` apre il modulo vuoto; altrimenti è lo strumento da modificare.
   const [editing, setEditing] = useState<string | 'new' | null>(null);
   const [updatingPrices, setUpdatingPrices] = useState(false);
+  const [editingCash, setEditingCash] = useState<string | null>(null);
   const [chartInstrument, setChartInstrument] = useState(ALL_INSTRUMENTS);
 
-  const investmentAccounts = accounts.filter(({ archived, type }) => type === 'investimento' && !archived);
   const active = useMemo(() => activeHoldings(holdings, accounts), [holdings, accounts]);
   const summaries = useMemo(() => summarizeHoldings(active, holdingSnapshots, today), [active, holdingSnapshots, today]);
   const totals = portfolioTotals(summaries);
   const balances = useMemo(() => computeBalances(accounts, transactions, today), [accounts, transactions, today]);
+  const overviews = useMemo(() => accountOverviews(accounts, summaries, balances), [accounts, summaries, balances]);
+  const overall = overviewTotals(overviews);
 
   const charted = active.find(({ id }) => id === chartInstrument);
   const series = useMemo(
@@ -433,7 +518,7 @@ export function Investimenti() {
     [active, charted, holdingSnapshots, today],
   );
 
-  if (investmentAccounts.length === 0) {
+  if (overviews.length === 0) {
     return (
       <Screen title="Investimenti">
         <section className="space-y-3 rounded-2xl bg-surface p-4">
@@ -450,29 +535,65 @@ export function Investimenti() {
   const hasAutomatic = summaries.some(({ holding }) => holding.quoteSource);
   const firstChartDate = series[0]?.date ?? today;
 
-  const hero =
-    summaries.length > 0 ? (
-      <>
-        <h1 className="text-sm font-medium text-muted">Investimenti</h1>
-        <p className="text-5xl font-bold">{formatCents(totals.valueCents)}</p>
-      </>
-    ) : undefined;
+  const showOverview = summaries.length > 0 || overall.cashCents !== 0;
+  const accountWithCashOpen = overviews.find(({ account }) => account.id === editingCash)?.account;
+
+  const hero = showOverview ? (
+    <>
+      <h1 className="text-sm font-medium text-muted">Totale dei conti investimento</h1>
+      <p className="text-5xl font-bold">{formatCents(overall.totalCents)}</p>
+    </>
+  ) : undefined;
 
   return (
     <Screen title="Investimenti" hero={hero}>
-      {summaries.length > 0 && (
+      {showOverview && (
         <>
           <div className="rounded-2xl bg-surface">
-            <StatGrid>
-              <StatTile label="Costo di acquisto" value={formatCents(totals.costCents)} />
-              <StatTile
-                label="Guadagno o perdita"
-                value={formatSignedCents(totals.gainCents)}
-                hint={totals.gainRate === null ? undefined : formatSignedRate(totals.gainRate)}
-                negative={totals.gainCents < 0}
-              />
-            </StatGrid>
-            <PriceNote summaries={summaries} syncState={syncState} today={today} />
+            <div className="flex items-center gap-4 p-4">
+              <DonutChart
+                segments={[
+                  { label: 'Investito', cents: overall.investedCents, color: 'var(--series-1)' },
+                  { label: 'Liquidità', cents: overall.cashCents, color: 'var(--series-3)' },
+                ]}
+              >
+                {overall.investedShare !== null && (
+                  <>
+                    <span className="text-lg leading-tight font-bold">{formatRate(overall.investedShare)}</span>
+                    <span className="text-[11px] leading-tight text-muted">investito</span>
+                  </>
+                )}
+              </DonutChart>
+              <dl className="min-w-0 flex-1 space-y-2">
+                <OverviewValue swatch="bg-series-1" label="Investito" value={formatCents(overall.investedCents)} />
+                <OverviewValue
+                  swatch="bg-series-3"
+                  label="Liquidità"
+                  value={overall.missingCash === overviews.length ? 'Da aggiungere' : formatCents(overall.cashCents)}
+                />
+              </dl>
+            </div>
+            {overall.missingCash > 0 && (
+              <p className="px-4 pb-3 text-xs text-muted">
+                {overall.missingCash === 1 ? 'Manca la liquidità di un conto' : `Manca la liquidità di ${overall.missingCash} conti`}: la aggiungi qui sotto.
+              </p>
+            )}
+            {summaries.length > 0 && (
+              <>
+                <div className="border-t border-line">
+                  <StatGrid>
+                    <StatTile label="Costo di acquisto" value={formatCents(totals.costCents)} />
+                    <StatTile
+                      label="Guadagno o perdita"
+                      value={formatSignedCents(totals.gainCents)}
+                      hint={totals.gainRate === null ? undefined : formatSignedRate(totals.gainRate)}
+                      negative={totals.gainCents < 0}
+                    />
+                  </StatGrid>
+                </div>
+                <PriceNote summaries={summaries} syncState={syncState} today={today} />
+              </>
+            )}
           </div>
           {manual.length > 0 && (
             <Button className="mt-3 w-full" onClick={() => setUpdatingPrices(true)}>
@@ -482,32 +603,25 @@ export function Investimenti() {
         </>
       )}
 
-      {investmentAccounts.map((account) => {
-        const rows = summaries.filter(({ holding }) => holding.accountId === account.id);
+      {overviews.map((overview) => {
+        const { account, cashCents, holdings: rows, investedCents, totalCents } = overview;
         return (
           <section key={account.id}>
-            <div className="flex items-baseline justify-between gap-3 px-1 pt-4 pb-2 text-sm font-semibold text-muted">
-              <h2 className="min-w-0 truncate">{account.name}</h2>
-              {rows.length > 0 && <span className="shrink-0 tabular-nums">{formatCents(portfolioTotals(rows).valueCents)}</span>}
-            </div>
-            {rows.length > 0 ? (
-              <ListGroup>
-                {rows.map((summary) => (
-                  <HoldingRow key={summary.holding.id} summary={summary} onPress={() => setEditing(summary.holding.id)} />
-                ))}
-              </ListGroup>
-            ) : (
-              <div className="rounded-2xl bg-surface px-4 py-3 text-sm">
-                <p className="flex justify-between gap-3">
-                  <span className="text-muted">Saldo dai movimenti</span>
-                  <span className="tabular-nums">{formatCents(balances.get(account.id) ?? 0)}</span>
-                </p>
-                <p className="pt-1 text-muted">Nessuno strumento: aggiungine uno per seguirne il valore.</p>
-                <button type="button" onClick={() => openReconcile(account.id, today)} className="mt-1 min-h-10 font-medium text-accent">
-                  Aggiorna saldo reale
-                </button>
+            <div className="px-1 pt-4 pb-2">
+              <div className="flex items-baseline justify-between gap-3 text-sm font-semibold text-muted">
+                <h2 className="min-w-0 truncate">{account.name}</h2>
+                <span className="shrink-0 tabular-nums">{formatCents(totalCents)}</span>
               </div>
-            )}
+              <p className="text-xs text-muted tabular-nums">
+                Investito {formatCents(investedCents)} · Liquidità {cashCents === null ? 'da aggiungere' : formatCents(cashCents)}
+              </p>
+            </div>
+            <ListGroup>
+              {rows.map((summary) => (
+                <HoldingRow key={summary.holding.id} summary={summary} onPress={() => setEditing(summary.holding.id)} />
+              ))}
+              <CashRow overview={overview} today={today} onPress={() => setEditingCash(account.id)} />
+            </ListGroup>
           </section>
         );
       })}
@@ -556,6 +670,7 @@ export function Investimenti() {
         />
       )}
       {updatingPrices && <PricesForm summaries={manual} today={today} onClose={() => setUpdatingPrices(false)} />}
+      {accountWithCashOpen && <CashForm key={accountWithCashOpen.id} account={accountWithCashOpen} today={today} onClose={() => setEditingCash(null)} />}
     </Screen>
   );
 }
