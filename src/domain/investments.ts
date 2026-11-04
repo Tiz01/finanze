@@ -200,25 +200,30 @@ export function accountOverviews(
 
 export interface OverviewTotals {
   investedCents: number;
+  /** I soldi sui conti remunerati. */
+  savingsCents: number;
   cashCents: number;
   totalCents: number;
-  /** La parte investita del totale, da 0 a 1. Null se non c'è niente da dividere. */
+  /** La parte investita del totale, conti remunerati compresi, da 0 a 1. Null se non c'è niente da dividere. */
   investedShare: number | null;
 }
 
-export function overviewTotals(overviews: AccountOverview[]): OverviewTotals {
+export function overviewTotals(overviews: AccountOverview[], savings: { balanceCents: number }[] = []): OverviewTotals {
   let investedCents = 0;
   let cashCents = 0;
   for (const overview of overviews) {
     investedCents += overview.investedCents;
     cashCents += overview.cashCents;
   }
-  const parts = investedCents + Math.max(cashCents, 0);
+  const savingsCents = savings.reduce((sum, { balanceCents }) => sum + balanceCents, 0);
+  const working = investedCents + Math.max(savingsCents, 0);
+  const parts = working + Math.max(cashCents, 0);
   return {
     investedCents,
+    savingsCents,
     cashCents,
-    totalCents: investedCents + cashCents,
-    investedShare: parts > 0 ? investedCents / parts : null,
+    totalCents: investedCents + savingsCents + cashCents,
+    investedShare: parts > 0 ? working / parts : null,
   };
 }
 

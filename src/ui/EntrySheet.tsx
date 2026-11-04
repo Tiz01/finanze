@@ -75,13 +75,17 @@ function EntryForm({ request }: { request: EntryRequest }) {
     (account) => !account.archived || account.id === seed?.accountId || account.id === seed?.toAccountId,
   );
 
-  const [type, setType] = useState<EntryType>(seed && seed.type !== 'rettifica' ? seed.type : 'uscita');
+  const transfer = request.mode === 'new' ? request.transfer : undefined;
+
+  const [type, setType] = useState<EntryType>(transfer ? 'trasferimento' : seed && seed.type !== 'rettifica' ? seed.type : 'uscita');
   const [input, setInput] = useState(seed ? centsToKeypadInput(seed.amountCents) : '');
-  const [accountId, setAccountId] = useState(
-    seed?.accountId ?? defaultAccountId(accounts, transactions, 'uscita') ?? '',
-  );
+  const [accountId, setAccountId] = useState(() => {
+    const preferred = transfer?.accountId ?? seed?.accountId ?? defaultAccountId(accounts, transactions, 'uscita') ?? '';
+    // Per un versamento il conto di partenza non può essere quello di arrivo.
+    return preferred === transfer?.toAccountId ? (otherAccountId(selectableAccounts, preferred) ?? '') : preferred;
+  });
   const [toAccountId, setToAccountId] = useState(
-    seed?.toAccountId ?? otherAccountId(selectableAccounts, accountId) ?? '',
+    transfer?.toAccountId ?? seed?.toAccountId ?? otherAccountId(selectableAccounts, accountId) ?? '',
   );
   const [date, setDate] = useState(seed?.date ?? today);
   const [categoryId, setCategoryId] = useState(seed?.categoryId);

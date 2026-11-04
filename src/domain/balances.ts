@@ -2,7 +2,7 @@ import { addDays, isValidIsoDate } from './dates';
 import type { Account, IsoDate, Transaction } from './types';
 
 /** Di quanto un movimento cambia i conti che tocca. */
-function balanceEffects({ accountId, amountCents, toAccountId, type }: Transaction): [string | undefined, number][] {
+export function balanceEffects({ accountId, amountCents, toAccountId, type }: Transaction): [string | undefined, number][] {
   switch (type) {
     case 'entrata':
     case 'rettifica':

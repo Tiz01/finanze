@@ -56,6 +56,10 @@ export function buildDemoData(today: IsoDate, now: Date = new Date()): {
     makeAccount('demo-contanti', 'Contanti Demo', 'contanti', 8000, start, true, createdAt(1)),
     makeAccount('demo-deposito', 'Deposito Demo', 'deposito', 300000, start, false, createdAt(2)),
     makeAccount('demo-broker', 'Broker Demo', 'investimento', 50000, start, false, createdAt(3)),
+    {
+      ...makeAccount('demo-remunerato', 'Conto Remunerato Demo', 'remunerato', 200000, start, false, createdAt(7)),
+      interest: { ratePercentMicros: 3_000_000, rateKind: 'lordo' as const, taxPercentMicros: 26_000_000, intervalMonths: 1, startDate: start, termMonths: 12 },
+    },
   ];
 
   const drafts: (TransactionDraft & { id?: string })[] = [];

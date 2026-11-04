@@ -407,7 +407,7 @@ describe('investito e liquidità', () => {
   });
 
   it('senza niente da dividere non c’è una percentuale', () => {
-    expect(overviewTotals([])).toEqual({ investedCents: 0, cashCents: 0, totalCents: 0, investedShare: null });
+    expect(overviewTotals([])).toEqual({ investedCents: 0, savingsCents: 0, cashCents: 0, totalCents: 0, investedShare: null });
   });
 
   it('una liquidità negativa non falsa la percentuale', () => {

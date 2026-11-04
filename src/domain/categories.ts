@@ -5,6 +5,7 @@ export const CATEGORY_IDS = {
   stipendio: 'cat-stipendio',
   regaliRicevuti: 'cat-regali-ricevuti',
   rimborsi: 'cat-rimborsi',
+  interessi: 'cat-interessi',
   nonTracciato: 'cat-non-tracciato',
 } as const;
 
@@ -79,6 +80,7 @@ export const DEFAULT_CATEGORIES: readonly Category[] = [
   category(20, CATEGORY_IDS.nonTracciato, 'Non tracciato', 'rettifica', OTHER_GROUP, '❓', '#64748b', {
     system: true,
   }),
+  category(21, CATEGORY_IDS.interessi, 'Interessi', 'entrata', INCOME_GROUP, '🏦', '#16a34a', { system: true }),
 ];
 
 /** Il primo carattere visibile del testo: un'emoji può occupare più punti di codice. */

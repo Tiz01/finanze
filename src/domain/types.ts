@@ -7,6 +7,7 @@ export const ACCOUNT_TYPES = [
   'contanti',
   'deposito',
   'carta_prepagata',
+  'remunerato',
   'investimento',
   'altro',
 ] as const;
@@ -22,6 +23,24 @@ export interface Account {
   archived: boolean;
   contaComeLiquidita: boolean;
   createdAt: string;
+  /** Solo nei conti remunerati. */
+  interest?: InterestTerms;
+}
+
+export type InterestRateKind = 'lordo' | 'netto';
+
+/** Le condizioni di un conto remunerato. Percentuali in milionesimi: 4,25% è 4_250_000. */
+export interface InterestTerms {
+  ratePercentMicros: number;
+  rateKind: InterestRateKind;
+  /** La ritenuta sugli interessi: conta solo se il tasso è lordo. */
+  taxPercentMicros: number;
+  intervalMonths: number;
+  startDate: IsoDate;
+  /** Null se non c'è una scadenza. */
+  termMonths: number | null;
+  /** L'ultimo accredito già confermato o saltato. */
+  creditedThrough?: IsoDate;
 }
 
 export const TRANSACTION_TYPES = ['entrata', 'uscita', 'trasferimento', 'rettifica'] as const;

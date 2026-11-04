@@ -1,5 +1,6 @@
 import { balanceFieldsFor } from '../domain/balances';
 import { isValidIsoDate } from '../domain/dates';
+import { interestTermsProblem } from '../domain/interest';
 import type { Account, IsoDate } from '../domain/types';
 import { db } from './db';
 import type { Undo } from './transactions';
@@ -11,7 +12,12 @@ function prepare(draft: AccountDraft): AccountDraft {
   if (!name) throw new Error('Scrivi il nome del conto');
   if (!Number.isSafeInteger(draft.initialBalanceCents)) throw new Error('Saldo iniziale non valido');
   if (!isValidIsoDate(draft.initialBalanceDate)) throw new Error('Data del saldo iniziale non valida');
-  return { ...draft, name };
+  // Le condizioni esistono solo nei conti remunerati: cambiando tipo se ne vanno.
+  const { interest, ...rest } = draft;
+  if (draft.type !== 'remunerato') return { ...rest, name };
+  const problem = interest ? interestTermsProblem(interest) : 'Mancano le condizioni del conto';
+  if (problem) throw new Error(problem);
+  return { ...rest, name, interest };
 }
 
 export async function createAccount(draft: AccountDraft): Promise<string> {
@@ -28,7 +34,9 @@ export async function updateAccount(id: string, draft: AccountDraft): Promise<vo
     if (prepared.type !== 'investimento' && (await db.holdings.where('accountId').equals(id).count()) > 0) {
       throw new Error('Il conto ha degli strumenti: per cambiare tipo togli prima quelli');
     }
-    await db.accounts.put({ ...prepared, id, createdAt: previous.createdAt });
+    const creditedThrough = previous.interest?.creditedThrough;
+    const interest = prepared.interest && creditedThrough ? { ...prepared.interest, creditedThrough } : prepared.interest;
+    await db.accounts.put({ ...prepared, ...(interest ? { interest } : {}), id, createdAt: previous.createdAt });
   });
 }
 

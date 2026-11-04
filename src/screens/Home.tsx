@@ -55,7 +55,7 @@ export function Home() {
   const liquidityText = formatCents(liquidity);
   const active = accounts.filter((account) => !account.archived);
   const liquid = active.filter((account) => account.contaComeLiquidita);
-  const others = active.filter((account) => !account.contaComeLiquidita && account.type !== 'investimento');
+  const others = active.filter(({ contaComeLiquidita, type }) => !contaComeLiquidita && type !== 'investimento' && type !== 'remunerato');
   const hasData = accounts.length > 0 || transactions.length > 0;
   const reminder = backupReminder(settings.lastBackupAt, hasData && !settings.demoLoaded, today);
 

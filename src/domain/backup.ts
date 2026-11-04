@@ -1,6 +1,7 @@
 import { mergeWrittenCash } from './balances';
 import { defaultBudgets } from './budgets';
 import { daysBetween, isValidIsoDate, toIsoDate } from './dates';
+import { interestTermsProblem } from './interest';
 import { isQuoteSource } from './quotes';
 import { validateRule } from './recurring';
 import { mappingShapeProblem } from './statementMapping';
@@ -24,7 +25,7 @@ import {
 } from './types';
 
 /** Stessa versione dello schema Dexie: va aumentata insieme a ogni migrazione. */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 const APP_ID = 'finanze';
 
@@ -168,6 +169,12 @@ function accountProblem(account: Account): string | null {
   if (!isValidIsoDate(account.initialBalanceDate)) return 'la data del saldo iniziale non è valida';
   if (typeof account.archived !== 'boolean' || typeof account.contaComeLiquidita !== 'boolean') {
     return 'i campi sì/no non sono validi';
+  }
+  if (account.type === 'remunerato' && !isRecord(account.interest)) return 'mancano le condizioni degli interessi';
+  if (account.interest !== undefined) {
+    if (!isRecord(account.interest)) return 'le condizioni degli interessi non sono valide';
+    const problem = interestTermsProblem(account.interest);
+    if (problem) return `condizioni degli interessi: ${problem}`;
   }
   return null;
 }

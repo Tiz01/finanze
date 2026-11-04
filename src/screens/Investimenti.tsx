@@ -30,6 +30,7 @@ import {
   formatSignedRate,
   keypadInputToCents,
 } from '../domain/money';
+import { interestOverviews } from '../domain/interest';
 import { isIsin, isSearchable, normalizeCode } from '../domain/quotes';
 import type { IsoDate } from '../domain/types';
 import { usePriceSyncState, useInstrumentLookup, type InstrumentLookup, type PriceSyncState } from '../quotes';
@@ -37,6 +38,7 @@ import { routeHref } from '../router';
 import { Button, ButtonLink, DateChip, Field, ListGroup, SectionTitle, SelectChip, SelectInput, TextInput } from '../ui/controls';
 import { DonutChart } from '../ui/DonutChart';
 import { notify, notifyError } from '../ui/feedback';
+import { InterestAccountSection, NewInterestAccountForm } from '../ui/InterestAccount';
 import { Keypad } from '../ui/Keypad';
 import { Screen } from '../ui/Screen';
 import { Sheet } from '../ui/Sheet';
@@ -501,6 +503,7 @@ export function Investimenti() {
   const [editing, setEditing] = useState<string | 'new' | null>(null);
   const [updatingPrices, setUpdatingPrices] = useState(false);
   const [editingCash, setEditingCash] = useState<string | null>(null);
+  const [addingSavings, setAddingSavings] = useState(false);
   const [chartInstrument, setChartInstrument] = useState(ALL_INSTRUMENTS);
 
   const active = useMemo(() => activeHoldings(holdings, accounts), [holdings, accounts]);
@@ -508,7 +511,8 @@ export function Investimenti() {
   const totals = portfolioTotals(summaries);
   const balances = useMemo(() => computeBalances(accounts, transactions, today), [accounts, transactions, today]);
   const overviews = useMemo(() => accountOverviews(accounts, summaries, balances), [accounts, summaries, balances]);
-  const overall = overviewTotals(overviews);
+  const savings = useMemo(() => interestOverviews(accounts, transactions, balances, today), [accounts, transactions, balances, today]);
+  const overall = overviewTotals(overviews, savings);
 
   const charted = active.find(({ id }) => id === chartInstrument);
   const series = useMemo(
@@ -516,14 +520,18 @@ export function Investimenti() {
     [active, charted, holdingSnapshots, today],
   );
 
-  if (overviews.length === 0) {
+  if (overviews.length === 0 && savings.length === 0) {
     return (
       <Screen title="Investimenti">
         <section className="space-y-3 rounded-2xl bg-surface p-4">
-          <h2 className="font-semibold">Per iniziare, crea il conto del tuo broker</h2>
-          <p className="text-sm text-muted">In Conti scegli il tipo Investimento: non entrerà nella liquidità disponibile.</p>
-          <ButtonLink href={routeHref('impostazioni/conti')}>Crea un conto</ButtonLink>
+          <h2 className="font-semibold">Per iniziare, aggiungi dove tieni i soldi</h2>
+          <p className="text-sm text-muted">Per il broker, in Conti scegli il tipo Investimento. Per un conto che dà interessi, usa Conto remunerato. Nessuno dei due entra nella liquidità disponibile.</p>
+          <ButtonLink href={routeHref('impostazioni/conti')}>Crea il conto del broker</ButtonLink>
+          <Button variant="secondary" className="w-full" onClick={() => setAddingSavings(true)}>
+            Aggiungi conto remunerato
+          </Button>
         </section>
+        {addingSavings && <NewInterestAccountForm today={today} onClose={() => setAddingSavings(false)} />}
       </Screen>
     );
   }
@@ -533,7 +541,10 @@ export function Investimenti() {
   const hasAutomatic = summaries.some(({ holding }) => holding.quoteSource);
   const firstChartDate = series[0]?.date ?? today;
 
-  const showOverview = summaries.length > 0 || overall.cashCents !== 0;
+  const showOverview = summaries.length > 0 || savings.length > 0 || overall.cashCents !== 0;
+  // Investito meno versato fa il guadagno: per questo i conti remunerati entrano in tutte e tre le cifre.
+  const paidInCents = totals.costCents + savings.reduce((sum, { capitalCents }) => sum + capitalCents, 0);
+  const gainCents = totals.gainCents + savings.reduce((sum, { receivedCents }) => sum + receivedCents, 0);
   const cashOverview = overviews.find(({ account }) => account.id === editingCash);
 
   const hero = showOverview ? (
@@ -551,7 +562,8 @@ export function Investimenti() {
             <div className="flex items-center gap-4 p-4">
               <DonutChart
                 segments={[
-                  { label: 'Investito', cents: overall.investedCents, color: 'var(--series-1)' },
+                  { label: savings.length > 0 ? 'Strumenti' : 'Investito', cents: overall.investedCents, color: 'var(--series-1)' },
+                  { label: 'Conti remunerati', cents: overall.savingsCents, color: 'var(--series-4)' },
                   { label: 'Liquidità', cents: overall.cashCents, color: 'var(--series-3)' },
                 ]}
               >
@@ -563,26 +575,27 @@ export function Investimenti() {
                 )}
               </DonutChart>
               <dl className="min-w-0 flex-1 space-y-2">
-                <OverviewValue swatch="bg-series-1" label="Investito" value={formatCents(overall.investedCents)} />
-                <OverviewValue swatch="bg-series-3" label="Liquidità" value={formatCents(overall.cashCents)} />
+                {(savings.length === 0 || summaries.length > 0) && (
+                  <OverviewValue swatch="bg-series-1" label={savings.length > 0 ? 'Strumenti' : 'Investito'} value={formatCents(overall.investedCents)} />
+                )}
+                {savings.length > 0 && <OverviewValue swatch="bg-series-4" label="Conti remunerati" value={formatCents(overall.savingsCents)} />}
+                {overviews.length > 0 && <OverviewValue swatch="bg-series-3" label="Liquidità" value={formatCents(overall.cashCents)} />}
               </dl>
             </div>
-            {summaries.length > 0 && (
-              <>
-                <div className="border-t border-line">
-                  <StatGrid>
-                    <StatTile label="Costo di acquisto" value={formatCents(totals.costCents)} />
-                    <StatTile
-                      label="Guadagno o perdita"
-                      value={formatSignedCents(totals.gainCents)}
-                      hint={totals.gainRate === null ? undefined : formatSignedRate(totals.gainRate)}
-                      negative={totals.gainCents < 0}
-                    />
-                  </StatGrid>
-                </div>
-                <PriceNote summaries={summaries} syncState={syncState} today={today} />
-              </>
+            {(summaries.length > 0 || savings.length > 0) && (
+              <div className="border-t border-line">
+                <StatGrid>
+                  <StatTile label={savings.length > 0 ? 'Soldi versati' : 'Costo di acquisto'} value={formatCents(paidInCents)} />
+                  <StatTile
+                    label="Guadagno o perdita"
+                    value={formatSignedCents(gainCents)}
+                    hint={paidInCents > 0 ? formatSignedRate(gainCents / paidInCents) : undefined}
+                    negative={gainCents < 0}
+                  />
+                </StatGrid>
+              </div>
             )}
+            {summaries.length > 0 && <PriceNote summaries={summaries} syncState={syncState} today={today} />}
           </div>
           {manual.length > 0 && (
             <Button className="mt-3 w-full" onClick={() => setUpdatingPrices(true)}>
@@ -615,9 +628,20 @@ export function Investimenti() {
         );
       })}
 
-      <Button variant="secondary" className="mt-4 w-full" onClick={() => setEditing('new')}>
-        Aggiungi strumento
-      </Button>
+      {savings.map((overview) => (
+        <InterestAccountSection key={overview.account.id} overview={overview} today={today} />
+      ))}
+
+      <div className="mt-4 space-y-2">
+        {overviews.length > 0 && (
+          <Button variant="secondary" className="w-full" onClick={() => setEditing('new')}>
+            Aggiungi strumento
+          </Button>
+        )}
+        <Button variant="secondary" className="w-full" onClick={() => setAddingSavings(true)}>
+          Aggiungi conto remunerato
+        </Button>
+      </div>
 
       {summaries.length > 0 && (
         <>
@@ -659,6 +683,7 @@ export function Investimenti() {
         />
       )}
       {updatingPrices && <PricesForm summaries={manual} today={today} onClose={() => setUpdatingPrices(false)} />}
+      {addingSavings && <NewInterestAccountForm today={today} onClose={() => setAddingSavings(false)} />}
       {cashOverview && <CashForm key={cashOverview.account.id} overview={cashOverview} today={today} onClose={() => setEditingCash(null)} />}
     </Screen>
   );

@@ -14,6 +14,7 @@
   --series-1: #0b8f82;
   --series-2: #eb6834;
   --series-3: #6250d6;
+  --series-4: #eda100;
   --good: #0ca30c;
   --warning: #fab219;
   --critical: #d03b3b;
@@ -34,6 +35,7 @@
     --series-1: #14a08f;
     --series-2: #d95926;
     --series-3: #9085e9;
+    --series-4: #c98500;
   }
 }
 
@@ -51,6 +53,7 @@
   --color-series-1: var(--series-1);
   --color-series-2: var(--series-2);
   --color-series-3: var(--series-3);
+  --color-series-4: var(--series-4);
   --color-good: var(--good);
   --color-warning: var(--warning);
   --color-critical: var(--critical);

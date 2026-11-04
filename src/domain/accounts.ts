@@ -5,6 +5,7 @@ export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   contanti: 'Contanti',
   deposito: 'Conto deposito',
   carta_prepagata: 'Carta prepagata',
+  remunerato: 'Conto remunerato',
   investimento: 'Investimento',
   altro: 'Altro',
 };

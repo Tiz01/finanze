@@ -4,12 +4,14 @@ import { useData } from '../../db/DataProvider';
 import { ACCOUNT_TYPE_LABELS, defaultCountsAsLiquidity } from '../../domain/accounts';
 import { balanceFieldsFor, computeBalances } from '../../domain/balances';
 import { todayIso } from '../../domain/dates';
+import { interestFormValues, parseInterestForm } from '../../domain/interest';
 import { formatCents } from '../../domain/money';
 import { ACCOUNT_TYPES, type Account, type AccountType } from '../../domain/types';
 import { routeHref } from '../../router';
 import { AmountField } from '../../ui/AmountField';
 import { Button, ButtonRow, Field, ListGroup, SectionTitle, SelectInput, TextInput, ToggleRow } from '../../ui/controls';
 import { notify } from '../../ui/feedback';
+import { InterestFields } from '../../ui/InterestFields';
 import { Screen } from '../../ui/Screen';
 import { Sheet } from '../../ui/Sheet';
 
@@ -36,6 +38,7 @@ function AccountForm({
   const [liquidity, setLiquidity] = useState(account?.contaComeLiquidita ?? defaultCountsAsLiquidity('corrente'));
   const [liquidityChosen, setLiquidityChosen] = useState(account !== null);
   const [archived, setArchived] = useState(account?.archived ?? false);
+  const [interestValues, setInterestValues] = useState(() => interestFormValues(account?.interest, initialDate));
   const [error, setError] = useState('');
 
   function changeType(next: AccountType) {
@@ -50,7 +53,10 @@ function AccountForm({
   }
 
   async function save() {
+    const parsedInterest = type === 'remunerato' ? parseInterestForm(interestValues) : null;
+    if (parsedInterest?.error) return setError(parsedInterest.error);
     const draft = {
+      ...(parsedInterest?.terms ? { interest: parsedInterest.terms } : {}),
       name,
       type,
       currency: account?.currency ?? 'EUR',
@@ -110,6 +116,9 @@ function AccountForm({
               }}
             />
           </Field>
+        )}
+        {type === 'remunerato' && (
+          <InterestFields values={interestValues} onChange={setInterestValues} balanceCents={account ? balanceCents : initialCents} />
         )}
         <ToggleRow
           label="Conta come liquidità"

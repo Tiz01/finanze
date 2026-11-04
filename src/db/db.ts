@@ -1,7 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 import { mergeWrittenCash } from '../domain/balances';
 import { defaultBudgets } from '../domain/budgets';
-import { DEFAULT_CATEGORIES } from '../domain/categories';
+import { CATEGORY_IDS, DEFAULT_CATEGORIES } from '../domain/categories';
 import type {
   Account,
   Budget,
@@ -65,6 +65,14 @@ class FinanzeDB extends Dexie {
         const movements = await transaction.table<Transaction>('transactions').toArray();
         const accounts = await transaction.table<Account>('accounts').toArray();
         await transaction.table<Account>('accounts').bulkPut(accounts.map((account) => mergeWrittenCash(account, movements)));
+      });
+    // I conti remunerati registrano gli interessi in una categoria propria.
+    this.version(6)
+      .stores({})
+      .upgrade(async (transaction) => {
+        const categories = transaction.table<Category>('categories');
+        const interest = DEFAULT_CATEGORIES.find(({ id }) => id === CATEGORY_IDS.interessi);
+        if (interest && !(await categories.get(interest.id))) await categories.add(interest);
       });
     this.on('populate', (transaction) => {
       void transaction.table('categories').bulkAdd([...DEFAULT_CATEGORIES]);
